@@ -22,3 +22,6 @@ String readUrlParam(String key) => '';
 
 /// Open a URL in a new browser tab (workflow/project links). No-op off web.
 void openUrl(String url) {}
+
+/// True on touch devices. Off the web there is no such signal.
+bool isTouchDevice() => false;

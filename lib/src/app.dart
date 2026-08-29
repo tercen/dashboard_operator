@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'data.dart';
+import 'widgets.dart';
 import 'platform/platform_stub.dart'
     if (dart.library.js_interop) 'platform/platform_web.dart' as platform;
 import 'screens/audit_screen.dart';
@@ -181,7 +182,7 @@ class _DashboardShellState extends State<DashboardShell> {
 
     // Mobile-friendly requirement (spec §7): on a phone the rail's icon
     // column would eat a third of the screen — use an app bar + drawer.
-    final isNarrow = MediaQuery.sizeOf(context).width < 720;
+    final isNarrow = isNarrowLayout(context);
     if (isNarrow) {
       return Scaffold(
         appBar: AppBar(

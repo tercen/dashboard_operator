@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:sci_http_client/error.dart';
 
 import 'admin_api.dart';
+import 'platform/platform_stub.dart'
+    if (dart.library.js_interop) 'platform/platform_web.dart' as platform;
 import 'theme.dart';
 
 /// Severity buckets, resolved against the active theme so chips read
@@ -186,7 +188,7 @@ class _RefreshingPanelState<T> extends State<RefreshingPanel<T>> {
     final theme = Theme.of(context);
     // Mobile-friendly: on narrow screens the actions (filters, pickers)
     // wrap onto their own line under the title instead of overflowing.
-    final isNarrow = MediaQuery.sizeOf(context).width < 720;
+    final isNarrow = isNarrowLayout(context);
     final titleRow = Row(children: [
       // On narrow screens the app bar already names the panel.
       if (!isNarrow) ...[
@@ -342,4 +344,13 @@ class CopyableId extends StatelessWidget {
       ),
     ]);
   }
+}
+
+/// Phone-shaped viewport. Width < 720 is the design breakpoint; the touch
+/// tiebreaker catches Chrome's "Desktop site" mode, which lays a phone out
+/// at ~980px (viewport meta ignored, desktop UA) but can't hide the
+/// touchscreen.
+bool isNarrowLayout(BuildContext context) {
+  final width = MediaQuery.sizeOf(context).width;
+  return width < 720 || (platform.isTouchDevice() && width < 1024);
 }

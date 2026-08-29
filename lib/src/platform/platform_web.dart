@@ -80,3 +80,14 @@ void openUrl(String url) {
     // Popup blocked; nothing sensible to do.
   }
 }
+
+/// True on touch devices. Survives Chrome's "Desktop site" mode, which
+/// spoofs a desktop UA and ignores the viewport meta (the page then lays
+/// out at ~980px) but cannot hide the touchscreen.
+bool isTouchDevice() {
+  try {
+    return web.window.navigator.maxTouchPoints > 0;
+  } catch (_) {
+    return false;
+  }
+}
