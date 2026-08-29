@@ -15,3 +15,7 @@ void scrubTokenFromUrl() {}
 String readSetting(String key) => '';
 
 void writeSetting(String key, String value) {}
+
+void setUrlParam(String key, String value) {}
+
+String readUrlParam(String key) => '';

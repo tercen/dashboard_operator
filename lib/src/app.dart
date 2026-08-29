@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 
 import 'data.dart';
+import 'platform/platform_stub.dart'
+    if (dart.library.js_interop) 'platform/platform_web.dart' as platform;
 import 'screens/overview_screen.dart';
 import 'screens/tasks_screen.dart';
+import 'screens/usage_screen.dart';
 import 'screens/users_screen.dart';
 import 'screens/workers_screen.dart';
 import 'session.dart';
@@ -57,17 +60,8 @@ class _RoleGate extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (session.isAdmin) {
+    if (session.isAdmin || session.isManager) {
       return DashboardShell(session: session, theme: theme);
-    }
-    if (session.isManager) {
-      // Manager usage views arrive with the UsageService backend (spec §8).
-      return const _MessagePage(
-        icon: Icons.query_stats,
-        title: 'Manager dashboard',
-        message: 'Usage views for your organization are coming here. '
-            'The current release contains the admin panels only.',
-      );
     }
     return const _MessagePage(
       icon: Icons.lock_outline,
@@ -92,28 +86,73 @@ class DashboardShell extends StatefulWidget {
 class _DashboardShellState extends State<DashboardShell> {
   late final DashboardData _data = DashboardData(widget.session);
   int _index = 0;
+  bool _restoredFromUrl = false;
 
-  static const _sections = [
-    (Icons.dashboard_outlined, Icons.dashboard, 'Overview'),
-    (Icons.checklist_outlined, Icons.checklist, 'Tasks'),
-    (Icons.memory_outlined, Icons.memory, 'Workers'),
-    (Icons.group_outlined, Icons.group, 'Users'),
-  ];
+  /// Sections available to this session. A manager without admin sees the
+  /// usage views only — every admin endpoint would refuse them anyway.
+  List<(IconData, IconData, String, Widget Function())> get _sections {
+    final usage = (
+      Icons.query_stats_outlined,
+      Icons.query_stats,
+      'Usage',
+      () => UsageScreen(data: _data) as Widget,
+    );
+    if (!widget.session.isAdmin) return [usage];
+    return [
+      (
+        Icons.dashboard_outlined,
+        Icons.dashboard,
+        'Overview',
+        () => OverviewScreen(data: _data) as Widget
+      ),
+      usage,
+      (
+        Icons.checklist_outlined,
+        Icons.checklist,
+        'Tasks',
+        () => TasksScreen(data: _data) as Widget
+      ),
+      (
+        Icons.memory_outlined,
+        Icons.memory,
+        'Workers',
+        () => WorkersScreen(data: _data) as Widget
+      ),
+      (
+        Icons.group_outlined,
+        Icons.group,
+        'Users',
+        () => UsersScreen(data: _data) as Widget
+      ),
+    ];
+  }
+
+  /// Deep links: `?section=tasks` opens straight into a panel, so a triage
+  /// URL can be pasted into an incident channel.
+  void _restoreSection(List<(IconData, IconData, String, Widget Function())> sections) {
+    if (_restoredFromUrl) return;
+    _restoredFromUrl = true;
+    final wanted = platform.readUrlParam('section').toLowerCase();
+    if (wanted.isEmpty) return;
+    final found =
+        sections.indexWhere((s) => s.$3.toLowerCase() == wanted);
+    if (found >= 0) _index = found;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final screens = [
-      OverviewScreen(data: _data),
-      TasksScreen(data: _data),
-      WorkersScreen(data: _data),
-      UsersScreen(data: _data),
-    ];
+    final sections = _sections;
+    _restoreSection(sections);
+    final index = _index.clamp(0, sections.length - 1);
     return Scaffold(
       body: Row(
         children: [
           NavigationRail(
-            selectedIndex: _index,
-            onDestinationSelected: (i) => setState(() => _index = i),
+            selectedIndex: index,
+            onDestinationSelected: (i) {
+              setState(() => _index = i);
+              platform.setUrlParam('section', sections[i].$3.toLowerCase());
+            },
             labelType: NavigationRailLabelType.all,
             leading: Padding(
               padding: const EdgeInsets.only(top: 8, bottom: 12),
@@ -167,7 +206,7 @@ class _DashboardShellState extends State<DashboardShell> {
               ),
             ),
             destinations: [
-              for (final (icon, selectedIcon, label) in _sections)
+              for (final (icon, selectedIcon, label, _) in sections)
                 NavigationRailDestination(
                   icon: Icon(icon),
                   selectedIcon: Icon(selectedIcon),
@@ -176,7 +215,7 @@ class _DashboardShellState extends State<DashboardShell> {
             ],
           ),
           const VerticalDivider(width: 1, thickness: 1),
-          Expanded(child: screens[_index]),
+          Expanded(child: sections[index].$4()),
         ],
       ),
     );

@@ -289,7 +289,11 @@ class ThemeController extends ValueNotifier<ThemeMode> {
   static const _storageKey = 'tercen.dashboard.theme';
 
   ThemeController() : super(ThemeMode.dark) {
-    final stored = platform.readSetting(_storageKey);
+    // An explicit ?theme= wins (shareable links, embedding), then the
+    // remembered choice; black remains the default.
+    final requested = platform.readUrlParam('theme');
+    final stored =
+        requested.isNotEmpty ? requested : platform.readSetting(_storageKey);
     if (stored == 'light') value = ThemeMode.light;
     if (stored == 'dark') value = ThemeMode.dark;
   }
@@ -298,6 +302,8 @@ class ThemeController extends ValueNotifier<ThemeMode> {
 
   void toggle() {
     value = isDark ? ThemeMode.light : ThemeMode.dark;
-    platform.writeSetting(_storageKey, isDark ? 'dark' : 'light');
+    final name = isDark ? 'dark' : 'light';
+    platform.writeSetting(_storageKey, name);
+    platform.setUrlParam('theme', name);
   }
 }

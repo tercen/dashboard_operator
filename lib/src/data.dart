@@ -4,6 +4,7 @@ import 'package:sci_tercen_client/sci_client.dart' as sci;
 
 import 'admin_api.dart';
 import 'session.dart';
+import 'usage.dart';
 
 /// Data access for the dashboard panels, on top of the existing API surface.
 /// Server-side authorization is the boundary: every call here is made with the
@@ -21,6 +22,17 @@ class DashboardData {
   /// depth, scheduler version). Admin only.
   Future<SchedulerStatus> schedulerStatus() async =>
       SchedulerStatus(await adminApi.getSchedulerStatus());
+
+  /// Usage rollup for the manager views. Manager or admin; the server
+  /// scopes non-admin callers to their own domain.
+  Future<UsageReport> usageReport({
+    required String scope,
+    required String from,
+    required String to,
+    required String bucket,
+  }) =>
+      adminApi.getUsageReport(
+          scope: scope, from: from, to: to, bucket: bucket);
 
   Future<sci.Version> tercenVersion() =>
       _f.userService.getServerVersion('tercen');

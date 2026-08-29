@@ -39,6 +39,28 @@ void writeSetting(String key, String value) {
   }
 }
 
+/// Reflect view state in the URL so a panel can be linked to
+/// (`?section=usage&period=lastYear`) without adding a router.
+void setUrlParam(String key, String value) {
+  try {
+    final params = Map.of(Uri.base.queryParameters)
+      ..remove('token')
+      ..[key] = value;
+    web.window.history.replaceState(
+        null, '', Uri.base.replace(queryParameters: params).toString());
+  } catch (_) {
+    // Cosmetic only.
+  }
+}
+
+String readUrlParam(String key) {
+  try {
+    return Uri.base.queryParameters[key] ?? '';
+  } catch (_) {
+    return '';
+  }
+}
+
 void scrubTokenFromUrl() {
   try {
     final params = Map.of(Uri.base.queryParameters)..remove('token');
