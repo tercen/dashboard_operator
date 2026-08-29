@@ -1,0 +1,32 @@
+name: tercen_dashboard
+description: "Tercen admin & manager dashboard — platform operations and per-tenant usage analytics, deployed as a Tercen web app."
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  web: ^0.5.1
+
+  sci_tercen_client:
+    git:
+      ref: 1.17.1
+      url: https://github.com/tercen/sci_tercen_client
+      path: sci_tercen_client
+  sci_http_client:
+    git:
+      ref: 1.17.1
+      url: https://github.com/tercen/sci_tercen_client
+      path: sci_http_client
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true

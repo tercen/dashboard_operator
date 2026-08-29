@@ -1,0 +1,18 @@
+{
+  "name": "Dashboard",
+  "description": "Tercen admin & manager dashboard: platform operations (tasks, workers, users, storage, GC) and per-tenant usage analytics.",
+  "isWebApp": true,
+  "isViewOnly": true,
+  "entryType": "app",
+  "serve": "build/web",
+  "tags": [
+    "admin",
+    "dashboard"
+  ],
+  "authors": [
+    "tercen"
+  ],
+  "urls": [
+    "https://github.com/tercen/dashboard_app"
+  ]
+}
