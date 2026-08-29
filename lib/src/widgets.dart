@@ -184,27 +184,43 @@ class _RefreshingPanelState<T> extends State<RefreshingPanel<T>> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // Mobile-friendly: on narrow screens the actions (filters, pickers)
+    // wrap onto their own line under the title instead of overflowing.
+    final isNarrow = MediaQuery.sizeOf(context).width < 720;
+    final titleRow = Row(children: [
+      // On narrow screens the app bar already names the panel.
+      if (!isNarrow) ...[
+        Text(widget.title, style: theme.textTheme.headlineSmall),
+        const SizedBox(width: 12),
+      ],
+      if (_loading)
+        const SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(strokeWidth: 2)),
+      const Spacer(),
+      if (!isNarrow) ...widget.actions,
+      IconButton(
+        tooltip: 'Refresh',
+        onPressed: _refresh,
+        icon: const Icon(Icons.refresh),
+      ),
+    ]);
+
     return Padding(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(isNarrow ? 12 : 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(children: [
-            Text(widget.title, style: theme.textTheme.headlineSmall),
-            const SizedBox(width: 12),
-            if (_loading)
-              const SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(strokeWidth: 2)),
-            const Spacer(),
-            ...widget.actions,
-            IconButton(
-              tooltip: 'Refresh',
-              onPressed: _refresh,
-              icon: const Icon(Icons.refresh),
-            ),
-          ]),
+          titleRow,
+          if (isNarrow && widget.actions.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: widget.actions),
+          ],
           const SizedBox(height: 12),
           Expanded(child: _body(context)),
         ],

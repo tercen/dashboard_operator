@@ -167,20 +167,76 @@ class _DashboardShellState extends State<DashboardShell> {
     if (found >= 0) _index = found;
   }
 
+  void _select(
+      int i, List<(IconData, IconData, String, Widget Function())> sections) {
+    setState(() => _index = i);
+    platform.setUrlParam('section', sections[i].$3.toLowerCase());
+  }
+
   @override
   Widget build(BuildContext context) {
     final sections = _sections;
     _restoreSection(sections);
     final index = _index.clamp(0, sections.length - 1);
+
+    // Mobile-friendly requirement (spec §7): on a phone the rail's icon
+    // column would eat a third of the screen — use an app bar + drawer.
+    final isNarrow = MediaQuery.sizeOf(context).width < 720;
+    if (isNarrow) {
+      return Scaffold(
+        appBar: AppBar(
+          title: Text(sections[index].$3),
+          actions: [
+            ValueListenableBuilder<ThemeMode>(
+              valueListenable: widget.theme,
+              builder: (context, _, __) => IconButton(
+                tooltip: widget.theme.isDark
+                    ? 'Switch to the white theme'
+                    : 'Switch to the black theme',
+                onPressed: widget.theme.toggle,
+                icon: Icon(widget.theme.isDark
+                    ? Icons.light_mode_outlined
+                    : Icons.dark_mode_outlined),
+              ),
+            ),
+          ],
+        ),
+        drawer: Drawer(
+          child: SafeArea(
+            child: ListView(
+              children: [
+                ListTile(
+                  leading: Icon(Icons.hub,
+                      color: Theme.of(context).colorScheme.primary),
+                  title: const Text('Tercen Dashboard'),
+                  subtitle: Text(
+                      '${widget.session.username}@${widget.session.domain.isEmpty ? "default" : widget.session.domain}'),
+                ),
+                const Divider(),
+                for (final (i, section) in sections.indexed)
+                  ListTile(
+                    leading: Icon(i == index ? section.$2 : section.$1),
+                    title: Text(section.$3),
+                    selected: i == index,
+                    onTap: () {
+                      Navigator.pop(context);
+                      _select(i, sections);
+                    },
+                  ),
+              ],
+            ),
+          ),
+        ),
+        body: sections[index].$4(),
+      );
+    }
+
     return Scaffold(
       body: Row(
         children: [
           NavigationRail(
             selectedIndex: index,
-            onDestinationSelected: (i) {
-              setState(() => _index = i);
-              platform.setUrlParam('section', sections[i].$3.toLowerCase());
-            },
+            onDestinationSelected: (i) => _select(i, sections),
             labelType: NavigationRailLabelType.all,
             leading: Padding(
               padding: const EdgeInsets.only(top: 8, bottom: 12),
