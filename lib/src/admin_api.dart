@@ -93,6 +93,27 @@ class AdminApi {
   Future<Map<String, dynamic>> findActivities({int limit = 100}) async =>
       _jsonCall('api/v1/admin/findActivities', {'limit': limit});
 
+  /// POST api/v1/admin/listUsers — users across domains.
+  Future<List<Map<String, dynamic>>> listUsers({int limit = 500}) async {
+    final report = await _jsonCall('api/v1/admin/listUsers', {'limit': limit});
+    return ((report['rows'] as List?) ?? [])
+        .map((r) => Map<String, dynamic>.from(r as Map))
+        .toList();
+  }
+
+  /// POST api/v1/admin/grantRole | revokeRole — returns the new role list.
+  Future<List<String>> changeRole({
+    required String username,
+    required String role,
+    required bool grant,
+  }) async {
+    final response = await _post(
+        'api/v1/admin/${grant ? 'grantRole' : 'revokeRole'}',
+        {'username': username, 'role': role});
+    final decoded = codec.decode(response.body);
+    return (decoded as List).map((r) => '$r').toList();
+  }
+
   Future<Map<String, String>> _pairs(String path) async {
     final response = await _post(path, const {});
     final pairs = (codec.decode(response.body) as List).cast<Map>();

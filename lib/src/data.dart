@@ -36,6 +36,13 @@ class DashboardData {
   Future<Map<String, dynamic>> activities({int limit = 100}) =>
       adminApi.findActivities(limit: limit);
 
+  /// Grant or revoke a role (admin only). Returns the user's new roles.
+  Future<List<String>> changeRole(
+          {required String username,
+          required String role,
+          required bool grant}) =>
+      adminApi.changeRole(username: username, role: role, grant: grant);
+
   /// Usage rollup for the manager views. Manager or admin; the server
   /// scopes non-admin callers to their own domain.
   Future<UsageReport> usageReport({
@@ -61,10 +68,11 @@ class DashboardData {
 
   Future<void> cancelTask(String taskId) => _f.taskService.cancelTask(taskId);
 
-  Future<List<sci.User>> users({int limit = 500}) async {
-    final result = await _f.userService
-        .findUserByCreatedDateAndName(limit: limit, descending: true);
-    return result.where((u) => u.kind == 'User').toList();
+  /// Users across domains, via AdminService — the legacy
+  /// findUserByCreatedDateAndName view returns nothing on some instances.
+  Future<List<DashboardUser>> users({int limit = 500}) async {
+    final rows = await adminApi.listUsers(limit: limit);
+    return rows.map(DashboardUser.fromJson).toList();
   }
 
   Future<sci.ResourceSummary> userResourceSummary(String userId) =>
@@ -84,6 +92,37 @@ class DashboardData {
         ? '$text\n… truncated at ${maxBytes ~/ 1024} KiB'
         : text;
   }
+}
+
+/// A user row from AdminService.listUsers.
+class DashboardUser {
+  final String id;
+  final String name;
+  final String email;
+  final String domain;
+  final List<String> roles;
+  final bool isValidated;
+  final String createdDate;
+
+  const DashboardUser({
+    required this.id,
+    required this.name,
+    required this.email,
+    required this.domain,
+    required this.roles,
+    required this.isValidated,
+    required this.createdDate,
+  });
+
+  factory DashboardUser.fromJson(Map<String, dynamic> m) => DashboardUser(
+        id: '${m['id'] ?? ''}',
+        name: '${m['name'] ?? ''}',
+        email: '${m['email'] ?? ''}',
+        domain: '${m['domain'] ?? ''}',
+        roles: ((m['roles'] as List?) ?? []).map((r) => '$r').toList(),
+        isValidated: m['isValidated'] == true,
+        createdDate: '${m['createdDate'] ?? ''}',
+      );
 }
 
 /// Typed view over the AdminService scheduler-status pairs.
