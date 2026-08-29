@@ -3,35 +3,52 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'theme.dart';
+
+/// Severity buckets, resolved against the active theme so chips read
+/// correctly on both the black and the white ground.
+enum Severity { ok, warn, bad, info, neutral }
+
 /// Colored chip for a task/worker state.
 class StateChip extends StatelessWidget {
   final String state;
   const StateChip(this.state, {super.key});
 
-  static const _colors = <String, (Color, Color)>{
-    'RunningState': (Color(0xFFDCEEFB), Color(0xFF0B5C8A)),
-    'RunningDependentState': (Color(0xFFDCEEFB), Color(0xFF0B5C8A)),
-    'PendingState': (Color(0xFFF8EEDD), Color(0xFF8A5E07)),
-    'InitState': (Color(0xFFF8EEDD), Color(0xFF8A5E07)),
-    'DoneState': (Color(0xFFE2F3EA), Color(0xFF186A45)),
-    'FailedState': (Color(0xFFFAE8E6), Color(0xFFA33227)),
-    'CanceledState': (Color(0xFFE8EDF0), Color(0xFF5B6C78)),
+  static const _severities = <String, Severity>{
+    'RunningState': Severity.info,
+    'RunningDependentState': Severity.info,
+    'PendingState': Severity.warn,
+    'InitState': Severity.warn,
+    'DoneState': Severity.ok,
+    'FailedState': Severity.bad,
+    'CanceledState': Severity.neutral,
     // Worker statuses share the widget.
-    'Available': (Color(0xFFE2F3EA), Color(0xFF186A45)),
-    'Idle': (Color(0xFFDCEEFB), Color(0xFF0B5C8A)),
-    'Unavailable': (Color(0xFFFAE8E6), Color(0xFFA33227)),
-    'Terminating': (Color(0xFFF8EEDD), Color(0xFF8A5E07)),
-    'Terminated': (Color(0xFFE8EDF0), Color(0xFF5B6C78)),
+    'Available': Severity.ok,
+    'Idle': Severity.info,
+    'Unavailable': Severity.bad,
+    'Terminating': Severity.warn,
+    'Terminated': Severity.neutral,
   };
+
+  static (Color, Color) colorsFor(BuildContext context, Severity severity) {
+    final c = Theme.of(context).extension<DashboardColors>() ??
+        DashboardColors.dark;
+    return switch (severity) {
+      Severity.ok => (c.okBg, c.okFg),
+      Severity.warn => (c.warnBg, c.warnFg),
+      Severity.bad => (c.badBg, c.badFg),
+      Severity.info => (c.infoBg, c.infoFg),
+      Severity.neutral => (c.neutralBg, c.neutralFg),
+    };
+  }
 
   @override
   Widget build(BuildContext context) {
     final label = state.endsWith('State')
         ? state.substring(0, state.length - 5)
         : state;
-    final (bg, fg) = _colors[state] ??
-        (Theme.of(context).colorScheme.surfaceContainerHighest,
-            Theme.of(context).colorScheme.onSurface);
+    final (bg, fg) =
+        colorsFor(context, _severities[state] ?? Severity.neutral);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(

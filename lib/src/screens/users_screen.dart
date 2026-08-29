@@ -77,7 +77,7 @@ class _UsersScreenState extends State<UsersScreen> {
                           : Icons.hourglass_empty,
                       size: 18,
                       color: user.isValidated
-                          ? const Color(0xFF186A45)
+                          ? StateChip.colorsFor(context, Severity.ok).$2
                           : Theme.of(context).colorScheme.outline,
                     )),
                     DataCell(Text(formatDate(user.createdDate.value))),

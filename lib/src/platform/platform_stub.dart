@@ -10,3 +10,8 @@ String readStoredToken(String key) => '';
 void storeToken(String key, String value) {}
 
 void scrubTokenFromUrl() {}
+
+/// Durable per-browser preferences (theme). No-op off the web.
+String readSetting(String key) => '';
+
+void writeSetting(String key, String value) {}

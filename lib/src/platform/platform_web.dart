@@ -21,6 +21,24 @@ void storeToken(String key, String value) {
   }
 }
 
+/// Durable per-browser preferences (theme). Unlike the session token these
+/// outlive the tab, so they use localStorage.
+String readSetting(String key) {
+  try {
+    return web.window.localStorage.getItem(key) ?? '';
+  } catch (_) {
+    return '';
+  }
+}
+
+void writeSetting(String key, String value) {
+  try {
+    web.window.localStorage.setItem(key, value);
+  } catch (_) {
+    // Storage blocked (private mode); the choice just won't persist.
+  }
+}
+
 void scrubTokenFromUrl() {
   try {
     final params = Map.of(Uri.base.queryParameters)..remove('token');

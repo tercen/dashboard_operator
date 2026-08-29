@@ -6,56 +6,66 @@ import 'screens/tasks_screen.dart';
 import 'screens/users_screen.dart';
 import 'screens/workers_screen.dart';
 import 'session.dart';
+import 'theme.dart';
 
-const _seed = Color(0xFF0E7490);
-
-class DashboardApp extends StatelessWidget {
+class DashboardApp extends StatefulWidget {
   final DashboardSession session;
   final Object? initError;
 
   const DashboardApp({super.key, required this.session, this.initError});
 
   @override
+  State<DashboardApp> createState() => _DashboardAppState();
+}
+
+class _DashboardAppState extends State<DashboardApp> {
+  final ThemeController _theme = ThemeController();
+
+  @override
+  void dispose() {
+    _theme.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Tercen Dashboard',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: _seed),
-        useMaterial3: true,
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: _theme,
+      builder: (context, mode, _) => MaterialApp(
+        title: 'Tercen Dashboard',
+        debugShowCheckedModeBanner: false,
+        theme: DashboardTheme.light,
+        darkTheme: DashboardTheme.dark,
+        // Black is the default; the viewer's OS preference is deliberately
+        // not consulted — an ops console should look the same everywhere.
+        themeMode: mode,
+        home: widget.initError != null
+            ? _MessagePage(
+                icon: Icons.link_off,
+                title: 'No session',
+                message: '${widget.initError}')
+            : _RoleGate(session: widget.session, theme: _theme),
       ),
-      darkTheme: ThemeData(
-        colorScheme:
-            ColorScheme.fromSeed(seedColor: _seed, brightness: Brightness.dark),
-        useMaterial3: true,
-      ),
-      themeMode: ThemeMode.system,
-      home: initError != null
-          ? _MessagePage(
-              icon: Icons.link_off,
-              title: 'No session',
-              message: '$initError')
-          : _RoleGate(session: session),
     );
   }
 }
 
 class _RoleGate extends StatelessWidget {
   final DashboardSession session;
-  const _RoleGate({required this.session});
+  final ThemeController theme;
+  const _RoleGate({required this.session, required this.theme});
 
   @override
   Widget build(BuildContext context) {
     if (session.isAdmin) {
-      return DashboardShell(session: session);
+      return DashboardShell(session: session, theme: theme);
     }
     if (session.isManager) {
       // Manager usage views arrive with the UsageService backend (spec §8).
       return const _MessagePage(
         icon: Icons.query_stats,
         title: 'Manager dashboard',
-        message:
-            'Usage views for your organization are coming here. '
+        message: 'Usage views for your organization are coming here. '
             'The current release contains the admin panels only.',
       );
     }
@@ -71,7 +81,9 @@ class _RoleGate extends StatelessWidget {
 
 class DashboardShell extends StatefulWidget {
   final DashboardSession session;
-  const DashboardShell({super.key, required this.session});
+  final ThemeController theme;
+  const DashboardShell(
+      {super.key, required this.session, required this.theme});
 
   @override
   State<DashboardShell> createState() => _DashboardShellState();
@@ -118,19 +130,39 @@ class _DashboardShellState extends State<DashboardShell> {
                 alignment: Alignment.bottomCenter,
                 child: Padding(
                   padding: const EdgeInsets.only(bottom: 16),
-                  child: Tooltip(
-                    message:
-                        '${widget.session.username}@${widget.session.domain.isEmpty ? "default" : widget.session.domain}',
-                    child: CircleAvatar(
-                      radius: 14,
-                      child: Text(
-                        widget.session.username.isEmpty
-                            ? '?'
-                            : widget.session.username[0].toUpperCase(),
-                        style: const TextStyle(fontSize: 13),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    ValueListenableBuilder<ThemeMode>(
+                      valueListenable: widget.theme,
+                      builder: (context, _, __) => IconButton(
+                        tooltip: widget.theme.isDark
+                            ? 'Switch to the white theme'
+                            : 'Switch to the black theme',
+                        onPressed: widget.theme.toggle,
+                        icon: Icon(widget.theme.isDark
+                            ? Icons.light_mode_outlined
+                            : Icons.dark_mode_outlined),
                       ),
                     ),
-                  ),
+                    const SizedBox(height: 8),
+                    Tooltip(
+                      message:
+                          '${widget.session.username}@${widget.session.domain.isEmpty ? "default" : widget.session.domain}',
+                      child: CircleAvatar(
+                        radius: 14,
+                        backgroundColor:
+                            Theme.of(context).colorScheme.primary,
+                        child: Text(
+                          widget.session.username.isEmpty
+                              ? '?'
+                              : widget.session.username[0].toUpperCase(),
+                          style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Theme.of(context).colorScheme.onPrimary),
+                        ),
+                      ),
+                    ),
+                  ]),
                 ),
               ),
             ),
