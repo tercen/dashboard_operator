@@ -9,8 +9,10 @@ class OverviewSnapshot {
   final sci.Version? sarno;
   final List<sci.Task> tasks;
   final List<sci.Worker> workers;
+  final SchedulerStatus? scheduler;
 
-  OverviewSnapshot(this.tercen, this.sarno, this.tasks, this.workers);
+  OverviewSnapshot(
+      this.tercen, this.sarno, this.tasks, this.workers, this.scheduler);
 }
 
 class OverviewScreen extends StatelessWidget {
@@ -20,16 +22,22 @@ class OverviewScreen extends StatelessWidget {
   Future<OverviewSnapshot> _load() async {
     final results = await Future.wait([
       data.tercenVersion(),
-      // Sarno may be unreachable; the tile degrades on its own.
+      // Sarno and the scheduler may be unreachable; their tiles degrade on
+      // their own instead of blanking the whole overview.
       data.sarnoVersion().then<sci.Version?>((v) => v).catchError((_) => null),
       data.tasks(),
       data.workers(),
+      data
+          .schedulerStatus()
+          .then<SchedulerStatus?>((s) => s)
+          .catchError((_) => null),
     ]);
     return OverviewSnapshot(
       results[0] as sci.Version,
       results[1] as sci.Version?,
       (results[2] as List).cast<sci.Task>(),
       (results[3] as List).cast<sci.Worker>(),
+      results[4] as SchedulerStatus?,
     );
   }
 
@@ -53,6 +61,7 @@ class OverviewScreen extends StatelessWidget {
             snap.workers.where((w) => w.status == 'Available').length;
         final domains =
             snap.tasks.map((t) => t.aclContext.domain).toSet().length;
+        final scheduler = snap.scheduler;
 
         String version(sci.Version? v) => v == null
             ? 'unreachable'
@@ -67,6 +76,31 @@ class OverviewScreen extends StatelessWidget {
                 runSpacing: 12,
                 children: [
                   for (final tile in [
+                    KpiTile(
+                        label: 'Scheduler',
+                        value: scheduler == null
+                            ? 'unreachable'
+                            : (scheduler.isRunning ? 'running' : 'stopped'),
+                        detail: scheduler == null
+                            ? 'status endpoint failed'
+                            : '${scheduler.isLeader ? "leader" : "follower"}'
+                                ' · ${scheduler.schedulerVersion}',
+                        icon: Icons.schedule,
+                        valueColor: scheduler == null || !scheduler.isRunning
+                            ? Theme.of(context).colorScheme.error
+                            : null),
+                    KpiTile(
+                        label: 'Queue',
+                        value:
+                            scheduler == null ? '—' : '${scheduler.queueSize}',
+                        detail: scheduler == null
+                            ? null
+                            : '${scheduler.busyWorkers} busy · '
+                                '${scheduler.availableWorkers} free workers',
+                        icon: Icons.pending_actions,
+                        valueColor: (scheduler?.queueSize ?? 0) > 0
+                            ? Theme.of(context).colorScheme.error
+                            : null),
                     KpiTile(
                         label: 'Running tasks',
                         value: '$running',
@@ -108,7 +142,7 @@ class OverviewScreen extends StatelessWidget {
               const SizedBox(height: 24),
               Text(
                 'Live snapshot from the scheduler and version endpoints. '
-                'Queue depth, GC state, storage and usage tiles land with the '
+                'GC state, storage and usage tiles land with the remaining '
                 'AdminService/UsageService backend work.',
                 style: Theme.of(context)
                     .textTheme

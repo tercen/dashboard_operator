@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:sci_tercen_client/sci_client.dart' as sci;
 
+import 'admin_api.dart';
 import 'session.dart';
 
 /// Data access for the dashboard panels, on top of the existing API surface.
@@ -9,10 +10,17 @@ import 'session.dart';
 /// session token and fails with 403 for callers without the required role.
 class DashboardData {
   final DashboardSession session;
+  late final AdminApi adminApi =
+      AdminApi(session.serviceBase, session.httpClient);
 
   DashboardData(this.session);
 
   sci.ServiceFactory get _f => session.factory;
+
+  /// Scheduler snapshot from AdminService (leader, worker counts, queue
+  /// depth, scheduler version). Admin only.
+  Future<SchedulerStatus> schedulerStatus() async =>
+      SchedulerStatus(await adminApi.getSchedulerStatus());
 
   Future<sci.Version> tercenVersion() =>
       _f.userService.getServerVersion('tercen');
@@ -51,6 +59,21 @@ class DashboardData {
         ? '$text\n… truncated at ${maxBytes ~/ 1024} KiB'
         : text;
   }
+}
+
+/// Typed view over the AdminService scheduler-status pairs.
+class SchedulerStatus {
+  final Map<String, String> _values;
+  SchedulerStatus(this._values);
+
+  bool get isLeader => _values['isLeader'] == 'true';
+  bool get isRunning => _values['isRunning'] == 'true';
+  int get totalWorkers => int.tryParse(_values['totalWorkers'] ?? '') ?? 0;
+  int get availableWorkers =>
+      int.tryParse(_values['availableWorkers'] ?? '') ?? 0;
+  int get busyWorkers => int.tryParse(_values['busyWorkers'] ?? '') ?? 0;
+  int get queueSize => int.tryParse(_values['queueSize'] ?? '') ?? 0;
+  String get schedulerVersion => _values['schedulerVersion'] ?? '';
 }
 
 /// Presentation helpers over the task model.

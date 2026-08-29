@@ -26,6 +26,11 @@ class DashboardSession {
 
   late final sci.ServiceFactory factory;
 
+  /// The authenticated HTTP client and service base URI, for API calls that
+  /// are newer than the pinned client release (see AdminApi).
+  late final http_api.HttpClient httpClient;
+  late final Uri serviceBase;
+
   String token = '';
   String username = '';
   String domain = '';
@@ -60,9 +65,9 @@ class DashboardSession {
 
     factory = sci.ServiceFactory();
     final base = isDev ? Uri.parse(devServiceUri) : Uri.base;
-    await factory.initializeWith(
-        Uri(scheme: base.scheme, host: base.host, port: base.port),
-        authClient);
+    serviceBase = Uri(scheme: base.scheme, host: base.host, port: base.port);
+    httpClient = authClient;
+    await factory.initializeWith(serviceBase, authClient);
 
     http_api.HttpClient.setCurrent(authClient);
     tercen.ServiceFactory.CURRENT = factory;
