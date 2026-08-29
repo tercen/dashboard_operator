@@ -1,4 +1,4 @@
-# dashboard_app
+# dashboard_operator
 
 Tercen admin & manager dashboard, deployed as a Tercen client web app
 (`WebAppOperator`). Specification: `sci/doc/admin-dashboard-spec.md`.
