@@ -71,7 +71,7 @@ class _UsersScreenState extends State<UsersScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return RefreshingPanel<List<DashboardUser>>(
+    return RefreshingPanel<UserListing>(
       title: 'Users',
       interval: const Duration(minutes: 2),
       load: widget.data.users,
@@ -91,8 +91,8 @@ class _UsersScreenState extends State<UsersScreen> {
         ),
         const SizedBox(width: 8),
       ],
-      builder: (context, users, refresh) {
-        final visible = users
+      builder: (context, listing, refresh) {
+        final visible = listing.users
             .where((u) =>
                 _filter.isEmpty ||
                 u.name.toLowerCase().contains(_filter) ||
@@ -100,7 +100,22 @@ class _UsersScreenState extends State<UsersScreen> {
                 u.domain.toLowerCase().contains(_filter))
             .toList();
         if (visible.isEmpty) {
-          return const Center(child: Text('No matching users.'));
+          return Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: Text(
+                listing.viaFallback
+                    ? 'This server has no AdminService, so the list came from '
+                        'findUserByCreatedDateAndName — a view that returns '
+                        'nothing on some instances (the built-in admin '
+                        'console is empty here too). Upgrade the server for a '
+                        'reliable listing.'
+                    : 'No matching users.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+          );
         }
         return SingleChildScrollView(
           scrollDirection: Axis.horizontal,

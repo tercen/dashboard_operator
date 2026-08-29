@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:sci_http_client/error.dart';
 import 'package:sci_tercen_client/sci_client.dart' as sci;
 
 import 'admin_api.dart';
@@ -70,9 +71,35 @@ class DashboardData {
 
   /// Users across domains, via AdminService — the legacy
   /// findUserByCreatedDateAndName view returns nothing on some instances.
-  Future<List<DashboardUser>> users({int limit = 500}) async {
-    final rows = await adminApi.listUsers(limit: limit);
-    return rows.map(DashboardUser.fromJson).toList();
+  ///
+  /// Falls back to that released query when the server has no AdminService,
+  /// so this panel still works against an older Tercen (where it is the
+  /// only option, empty or not).
+  Future<UserListing> users({int limit = 500}) async {
+    try {
+      final rows = await adminApi.listUsers(limit: limit);
+      return UserListing(
+          users: rows.map(DashboardUser.fromJson).toList(), viaFallback: false);
+    } on ServiceError catch (e) {
+      if (e.statusCode != 404) rethrow;
+      final legacy = await _f.userService
+          .findUserByCreatedDateAndName(limit: limit, descending: true);
+      return UserListing(
+        users: legacy
+            .where((u) => u.kind == 'User')
+            .map((u) => DashboardUser(
+                  id: u.id,
+                  name: u.name,
+                  email: u.email,
+                  domain: u.domain,
+                  roles: u.roles.toList(),
+                  isValidated: u.isValidated,
+                  createdDate: u.createdDate.value,
+                ))
+            .toList(),
+        viaFallback: true,
+      );
+    }
   }
 
   Future<sci.ResourceSummary> userResourceSummary(String userId) =>
@@ -92,6 +119,16 @@ class DashboardData {
         ? '$text\n… truncated at ${maxBytes ~/ 1024} KiB'
         : text;
   }
+}
+
+/// The user list plus how it was obtained: on a server without
+/// AdminService the panel falls back to findUserByCreatedDateAndName,
+/// which returns nothing on some instances — an empty list then means
+/// "the old query found none", not "there are no users".
+class UserListing {
+  final List<DashboardUser> users;
+  final bool viaFallback;
+  const UserListing({required this.users, required this.viaFallback});
 }
 
 /// A user row from AdminService.listUsers.

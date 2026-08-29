@@ -147,8 +147,17 @@ class AdminApi {
     return response;
   }
 
+  /// Error code raised when the server predates these endpoints — the
+  /// route simply does not exist, so the response is a 404 with no
+  /// service-error body.
+  static const unavailableCode = 'admin.service.unavailable';
+
   ServiceError _serviceError(http_api.Response response) {
     final status = response.statusCode ?? 0;
+    if (status == 404) {
+      return ServiceError(404, unavailableCode,
+          'This Tercen server does not provide the dashboard API yet.');
+    }
     try {
       final m = codec.decode(response.body) as Map;
       return ServiceError(status, '${m['error']}', '${m['reason']}');

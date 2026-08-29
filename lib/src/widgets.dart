@@ -3,6 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'package:sci_http_client/error.dart';
+
+import 'admin_api.dart';
 import 'theme.dart';
 
 /// Severity buckets, resolved against the active theme so chips read
@@ -227,9 +230,46 @@ class ErrorBox extends StatelessWidget {
   final VoidCallback? onRetry;
   const ErrorBox({super.key, required this.error, this.onRetry});
 
+  /// A 404 here means the server has no such route, not that something
+  /// broke: this panel needs a Tercen build carrying AdminService /
+  /// UsageService. Say that plainly instead of showing a raw error.
+  bool get _serverTooOld {
+    final e = error;
+    return e is ServiceError &&
+        (e.statusCode == 404 || e.error == AdminApi.unavailableCode);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    if (_serverTooOld) {
+      return Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.all(22),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.cloud_off_outlined,
+                    color: theme.colorScheme.onSurfaceVariant, size: 30),
+                const SizedBox(height: 12),
+                Text('Not available on this server',
+                    style: theme.textTheme.titleMedium),
+                const SizedBox(height: 8),
+                Text(
+                  'This panel needs the dashboard API (AdminService / '
+                  'UsageService), which this Tercen build does not have. '
+                  'Tasks and Workers keep working; the rest arrives when the '
+                  'server is upgraded.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall,
+                ),
+              ]),
+            ),
+          ),
+        ),
+      );
+    }
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 520),
