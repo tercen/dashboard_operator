@@ -95762,7 +95762,7 @@ n=o.ry
 if(n==null){n=o.t
 o=n==null?o.k3:n}else o=n
 o=a0.bA(o)
-a0=o}return A.f7(A.dE(A.c([b,B.i1,A.aq("Live snapshot from the scheduler and version endpoints. GC state, storage and usage tiles land with the remaining AdminService/UsageService backend work.",d,d,d,a0,d,d)],a),B.aw,B.w,B.S),d,B.X)},
+a0=o}return A.f7(A.dE(A.c([b,B.i1,A.aq("Live snapshot from the scheduler and version endpoints; the other panels cover usage, tasks, workers, users, storage, GC and audit.",d,d,d,a0,d,d)],a),B.aw,B.w,B.S),d,B.X)},
 $S:561}
 A.ahs.prototype={
 $1(a){return B.c.bm(a.R8.gaE(),"Running")},

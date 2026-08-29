@@ -141,9 +141,9 @@ class OverviewScreen extends StatelessWidget {
               ),
               const SizedBox(height: 24),
               Text(
-                'Live snapshot from the scheduler and version endpoints. '
-                'GC state, storage and usage tiles land with the remaining '
-                'AdminService/UsageService backend work.',
+                'Live snapshot from the scheduler and version endpoints; '
+                'the other panels cover usage, tasks, workers, users, '
+                'storage, GC and audit.',
                 style: Theme.of(context)
                     .textTheme
                     .bodySmall
