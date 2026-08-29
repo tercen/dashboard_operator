@@ -105,6 +105,33 @@ class DashboardData {
   Future<sci.ResourceSummary> userResourceSummary(String userId) =>
       _f.userService.resourceSummary(userId);
 
+  /// Workflow name and step names for the tasks panel's provenance links,
+  /// resolved once per workflow and cached for the session. Null when the
+  /// workflow is gone or not readable by this role.
+  final Map<String, Future<WorkflowRef?>> _workflowRefs = {};
+
+  Future<WorkflowRef?> workflowRef(String workflowId) =>
+      _workflowRefs.putIfAbsent(workflowId, () async {
+        try {
+          final w = await _f.workflowService.get(workflowId);
+          return WorkflowRef(
+            id: w.id,
+            name: w.name,
+            stepNames: {for (final s in w.steps) s.id: s.name},
+          );
+        } catch (_) {
+          return null;
+        }
+      });
+
+  /// Legacy web UI deep links; :owner is a name and workflow URLs have no
+  /// project segment.
+  String workflowUrl(String owner, String workflowId) =>
+      session.serviceBase.replace(path: '/$owner/w/$workflowId').toString();
+
+  String projectUrl(String owner, String projectId) =>
+      session.serviceBase.replace(path: '/$owner/p/$projectId').toString();
+
   /// Reads a task's stdout/stderr log file, capped so a runaway log cannot
   /// freeze the tab.
   Future<String> readLog(String fileDocumentId, {int maxBytes = 262144}) async {
@@ -129,6 +156,15 @@ class UserListing {
   final List<DashboardUser> users;
   final bool viaFallback;
   const UserListing({required this.users, required this.viaFallback});
+}
+
+/// A workflow's name and step names, for rendering task provenance.
+class WorkflowRef {
+  final String id;
+  final String name;
+  final Map<String, String> stepNames;
+  const WorkflowRef(
+      {required this.id, required this.name, required this.stepNames});
 }
 
 /// A user row from AdminService.listUsers.
@@ -193,6 +229,24 @@ extension TaskView on sci.Task {
 
   String get bookedCpu => envValue('cpu');
   String get bookedRam => envValue('ram');
+
+  /// Provenance stamped by the step that created the task
+  /// ("workflow.id"/"step.id" environment pairs, Tercen >= 1.0.16).
+  /// RunWorkflowTask carries the workflow as a field instead of a stamp.
+  String get workflowId {
+    final t = this;
+    if (t is sci.RunWorkflowTask && t.workflowId.isNotEmpty) {
+      return t.workflowId;
+    }
+    return envValue('workflow.id');
+  }
+  String get stepId => envValue('step.id');
+
+  /// Project the task belongs to, when the task kind carries one.
+  String get taskProjectId {
+    final t = this;
+    return t is sci.ProjectTask ? t.projectId : '';
+  }
 
   String get failureError {
     final s = state;

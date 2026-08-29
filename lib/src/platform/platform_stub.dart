@@ -19,3 +19,6 @@ void writeSetting(String key, String value) {}
 void setUrlParam(String key, String value) {}
 
 String readUrlParam(String key) => '';
+
+/// Open a URL in a new browser tab (workflow/project links). No-op off web.
+void openUrl(String url) {}

@@ -71,3 +71,12 @@ void scrubTokenFromUrl() {
     // Cosmetic only; failing to scrub must not break the session.
   }
 }
+
+/// Open a URL in a new browser tab (workflow/project links).
+void openUrl(String url) {
+  try {
+    web.window.open(url, '_blank');
+  } catch (_) {
+    // Popup blocked; nothing sensible to do.
+  }
+}

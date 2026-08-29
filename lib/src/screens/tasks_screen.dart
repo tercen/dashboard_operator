@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:sci_tercen_client/sci_client.dart' as sci;
 
 import '../data.dart';
+import '../platform/platform_stub.dart'
+    if (dart.library.js_interop) '../platform/platform_web.dart' as platform;
 import '../widgets.dart';
 
 class TasksScreen extends StatelessWidget {
@@ -31,6 +33,7 @@ class TasksScreen extends StatelessWidget {
               columns: const [
                 DataColumn(label: Text('KIND')),
                 DataColumn(label: Text('STATE')),
+                DataColumn(label: Text('WORKFLOW')),
                 DataColumn(label: Text('OWNER')),
                 DataColumn(label: Text('USER')),
                 DataColumn(label: Text('DOMAIN')),
@@ -47,6 +50,7 @@ class TasksScreen extends StatelessWidget {
                         onTap: () => _showDetail(context, task)),
                     DataCell(StateChip(task.stateKind),
                         onTap: () => _showDetail(context, task)),
+                    DataCell(WorkflowLink(task: task, data: data)),
                     DataCell(Text(task.owner)),
                     DataCell(Text(task.aclContext.username)),
                     DataCell(Text(task.aclContext.domain.isEmpty
@@ -171,6 +175,20 @@ class TasksScreen extends StatelessWidget {
                         if (task.failureReason.isNotEmpty)
                           _row('Reason',
                               SelectableText(task.failureReason)),
+                        if (task.workflowId.isNotEmpty)
+                          _row('Workflow',
+                              WorkflowLink(task: task, data: data)),
+                        if (task.workflowId.isNotEmpty)
+                          _row('Workflow id', CopyableId(task.workflowId)),
+                        if (task.stepId.isNotEmpty)
+                          _row('Step id', CopyableId(task.stepId)),
+                        if (task.taskProjectId.isNotEmpty)
+                          _row(
+                              'Project',
+                              LinkText(
+                                  text: task.taskProjectId,
+                                  url: data.projectUrl(
+                                      task.owner, task.taskProjectId))),
                         if (task.environment.isNotEmpty) ...[
                           const SizedBox(height: 12),
                           Text('Environment',
@@ -275,6 +293,64 @@ class TasksScreen extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// A small tappable link that opens a legacy-UI page in a new tab.
+class LinkText extends StatelessWidget {
+  final String text;
+  final String url;
+  const LinkText({super.key, required this.text, required this.url});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.primary;
+    return InkWell(
+      onTap: () => platform.openUrl(url),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Flexible(
+            child: Text(text,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: color))),
+        const SizedBox(width: 3),
+        Icon(Icons.open_in_new, size: 13, color: color),
+      ]),
+    );
+  }
+}
+
+/// Task provenance cell: "workflow › step" linking to the workflow when
+/// the task carries workflow.id/step.id environment stamps; a project
+/// link when it only carries a projectId; a dash otherwise.
+class WorkflowLink extends StatelessWidget {
+  final sci.Task task;
+  final DashboardData data;
+  const WorkflowLink({super.key, required this.task, required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final workflowId = task.workflowId;
+    if (workflowId.isEmpty) {
+      final projectId = task.taskProjectId;
+      if (projectId.isEmpty) return const Text('—');
+      return LinkText(
+          text: 'project', url: data.projectUrl(task.owner, projectId));
+    }
+    final url = data.workflowUrl(task.owner, workflowId);
+    return FutureBuilder<WorkflowRef?>(
+      future: data.workflowRef(workflowId),
+      builder: (context, snap) {
+        final ref = snap.data;
+        // Fall back to the raw id while loading or when the workflow is
+        // gone / not readable by this role — the link stays useful.
+        var label = ref?.name ?? '';
+        if (label.isEmpty) label = workflowId.substring(0, 8);
+        final stepName =
+            ref?.stepNames[task.stepId] ?? '';
+        if (stepName.isNotEmpty) label = '$label › $stepName';
+        return LinkText(text: label, url: url);
+      },
     );
   }
 }
