@@ -3,7 +3,11 @@ import 'package:flutter/material.dart';
 import 'data.dart';
 import 'platform/platform_stub.dart'
     if (dart.library.js_interop) 'platform/platform_web.dart' as platform;
+import 'screens/audit_screen.dart';
+import 'screens/gc_screen.dart';
 import 'screens/overview_screen.dart';
+import 'screens/settings_screen.dart';
+import 'screens/storage_screen.dart';
 import 'screens/tasks_screen.dart';
 import 'screens/usage_screen.dart';
 import 'screens/users_screen.dart';
@@ -123,6 +127,30 @@ class _DashboardShellState extends State<DashboardShell> {
         Icons.group,
         'Users',
         () => UsersScreen(data: _data) as Widget
+      ),
+      (
+        Icons.storage_outlined,
+        Icons.storage,
+        'Storage',
+        () => StorageScreen(data: _data) as Widget
+      ),
+      (
+        Icons.delete_sweep_outlined,
+        Icons.delete_sweep,
+        'GC',
+        () => GcScreen(data: _data) as Widget
+      ),
+      (
+        Icons.history_outlined,
+        Icons.history,
+        'Audit',
+        () => AuditScreen(data: _data) as Widget
+      ),
+      (
+        Icons.settings_outlined,
+        Icons.settings,
+        'Settings',
+        () => SettingsScreen(data: _data) as Widget
       ),
     ];
   }

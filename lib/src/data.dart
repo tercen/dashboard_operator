@@ -23,6 +23,19 @@ class DashboardData {
   Future<SchedulerStatus> schedulerStatus() async =>
       SchedulerStatus(await adminApi.getSchedulerStatus());
 
+  /// Redacted server configuration (admin only).
+  Future<Map<String, String>> configSummary() => adminApi.getConfigSummary();
+
+  /// Garbage-collector state (admin only).
+  Future<Map<String, dynamic>> gcStatus() => adminApi.getGcStatus();
+
+  /// Per-team storage for the caller's domain (admin only).
+  Future<Map<String, dynamic>> storageReport() => adminApi.getStorageReport();
+
+  /// Cross-domain activity feed (admin only).
+  Future<Map<String, dynamic>> activities({int limit = 100}) =>
+      adminApi.findActivities(limit: limit);
+
   /// Usage rollup for the manager views. Manager or admin; the server
   /// scopes non-admin callers to their own domain.
   Future<UsageReport> usageReport({

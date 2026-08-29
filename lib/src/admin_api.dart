@@ -76,6 +76,56 @@ class AdminApi {
     return UsageReport.fromJson(Map<String, dynamic>.from(payload));
   }
 
+  /// POST api/v1/admin/getConfigSummary — redacted server config.
+  Future<Map<String, String>> getConfigSummary() async =>
+      _pairs('api/v1/admin/getConfigSummary');
+
+  /// POST api/v1/admin/getGcStatus — garbage-collector state.
+  Future<Map<String, dynamic>> getGcStatus() async =>
+      _jsonCall('api/v1/admin/getGcStatus', const {});
+
+  /// POST api/v1/admin/getStorageReport — per-team storage for a domain
+  /// (empty string = the caller's own domain).
+  Future<Map<String, dynamic>> getStorageReport({String domain = ''}) async =>
+      _jsonCall('api/v1/admin/getStorageReport', {'domain': domain});
+
+  /// POST api/v1/admin/findActivities — cross-domain audit feed.
+  Future<Map<String, dynamic>> findActivities({int limit = 100}) async =>
+      _jsonCall('api/v1/admin/findActivities', {'limit': limit});
+
+  Future<Map<String, String>> _pairs(String path) async {
+    final response = await _post(path, const {});
+    final pairs = (codec.decode(response.body) as List).cast<Map>();
+    return {for (final pair in pairs) '${pair['key']}': '${pair['value']}'};
+  }
+
+  /// Calls an endpoint that answers with a JSON document. The TSON codec
+  /// may hand it back bare, wrapped in a single-element list, or already
+  /// decoded — accept all three rather than guessing.
+  Future<Map<String, dynamic>> _jsonCall(
+      String path, Map<String, Object> params) async {
+    final response = await _post(path, params);
+    var payload = codec.decode(response.body);
+    if (payload is List && payload.isNotEmpty) payload = payload.first;
+    if (payload is String) payload = json.decode(payload);
+    if (payload is! Map) {
+      throw ServiceError(
+          500, 'admin.decode', 'unexpected payload ${payload.runtimeType}');
+    }
+    return Map<String, dynamic>.from(payload);
+  }
+
+  Future<http_api.Response> _post(
+      String path, Map<String, Object> params) async {
+    final response = await client.post(
+        http_api.HttpClient.ResolveUri(base, path),
+        headers: codec.contentTypeHeader,
+        responseType: codec.responseType,
+        body: codec.encode(params));
+    if (response.statusCode != 200) throw _serviceError(response);
+    return response;
+  }
+
   ServiceError _serviceError(http_api.Response response) {
     final status = response.statusCode ?? 0;
     try {
