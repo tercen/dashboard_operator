@@ -78,4 +78,46 @@ void main() {
       expect(UsagePeriod.lastYear.bucket, 'month');
     });
   });
+
+  group('closed windows (tercen/sci#1231)', () {
+    final now = DateTime.utc(2026, 8, 29, 11, 30);
+
+    test('a window ending before today is closed', () {
+      expect(isClosedWindow('2026-08-28', now: now), isTrue);
+      expect(isClosedWindow('2020-01-01', now: now), isTrue);
+    });
+
+    test('a window ending today is not closed — runs can still land in it', () {
+      expect(isClosedWindow('2026-08-29', now: now), isFalse);
+    });
+
+    test('a window ending in the future is not closed', () {
+      expect(isClosedWindow('2026-08-30', now: now), isFalse);
+    });
+
+    test('every period: the current window is open, the comparison is closed',
+        () {
+      // This asymmetry is what makes caching the comparison window safe. If
+      // range()/previousRange() ever stop guaranteeing it, the Usage panel
+      // would start serving a stale comparison — so pin it here rather than
+      // in the screen.
+      for (final period in UsagePeriod.values) {
+        final (_, to) = period.range(now: now);
+        final (_, prevTo) = period.previousRange(now: now);
+
+        expect(isClosedWindow(to, now: now), isFalse,
+            reason: '${period.name}: the current window must stay live');
+        expect(isClosedWindow(prevTo, now: now), isTrue,
+            reason: '${period.name}: the comparison window must be final');
+      }
+    });
+
+    test('the boundary moves with UTC midnight', () {
+      // Yesterday's comparison must not be reused once the day rolls over —
+      // the cache is keyed by the request, and the request changes here.
+      const to = '2026-08-29';
+      expect(isClosedWindow(to, now: DateTime.utc(2026, 8, 29, 23, 59)), isFalse);
+      expect(isClosedWindow(to, now: DateTime.utc(2026, 8, 30, 0, 1)), isTrue);
+    });
+  });
 }

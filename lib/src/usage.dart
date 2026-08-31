@@ -139,3 +139,13 @@ enum UsagePeriod {
       '${d.month.toString().padLeft(2, '0')}-'
       '${d.day.toString().padLeft(2, '0')}';
 }
+
+/// Whether a report window has already closed — its last day is behind us, so
+/// no further run can land in it and its numbers are final.
+///
+/// `range()` always ends on today, so a current window is never closed.
+/// `previousRange()` always ends the day before the current window starts, so
+/// a comparison window always is. That asymmetry is what lets the Usage panel
+/// fetch the comparison once instead of on every refresh tick.
+bool isClosedWindow(String to, {DateTime? now}) =>
+    to.compareTo(UsagePeriod._day((now ?? DateTime.now().toUtc()))) < 0;
