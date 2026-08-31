@@ -34,20 +34,48 @@ class _UsageScreenState extends State<UsageScreen> {
     return (wanted == 'user' || wanted == 'team') ? wanted : 'team';
   }
 
+  /// Reports for a window that has already closed, keyed by the request that
+  /// produced them.
+  ///
+  /// The panel refreshes on a timer, and half of every load is the previous
+  /// period — which is entirely in the past and cannot change. Refetching it
+  /// each tick doubles the server cost of an open tab to buy a number that is
+  /// already known; on a large tenant that aggregate is expensive
+  /// (tercen/sci#1231).
+  ///
+  /// The key is the request itself rather than the period, so a UTC midnight
+  /// rollover — which shifts every range by a day — yields a new key and a
+  /// fresh fetch instead of serving yesterday's comparison.
+  final _closedWindows = <String, UsageReport>{};
+
+  /// Fetch a usage report, reusing a cached answer for a window that can no
+  /// longer change. Only successful fetches are cached, so a failure is
+  /// retried on the next tick rather than remembered.
+  Future<UsageReport> _report({
+    required String from,
+    required String to,
+    required String bucket,
+  }) async {
+    final key = '$_scope|$from|$to|$bucket';
+    final closed = isClosedWindow(to);
+    if (closed) {
+      final cached = _closedWindows[key];
+      if (cached != null) return cached;
+    }
+    final report = await widget.data
+        .usageReport(scope: _scope, from: from, to: to, bucket: bucket);
+    if (closed) _closedWindows[key] = report;
+    return report;
+  }
+
   Future<(UsageReport, UsageReport)> _load() async {
     final (from, to) = _period.range();
     final (prevFrom, prevTo) = _period.previousRange();
     final results = await Future.wait([
-      widget.data.usageReport(
-          scope: _scope, from: from, to: to, bucket: _period.bucket),
+      _report(from: from, to: to, bucket: _period.bucket),
       // The previous window powers the trend deltas; a failure there must
       // not cost us the current numbers.
-      widget.data
-          .usageReport(
-              scope: _scope,
-              from: prevFrom,
-              to: prevTo,
-              bucket: _period.bucket)
+      _report(from: prevFrom, to: prevTo, bucket: _period.bucket)
           .catchError((_) => UsageReport.empty),
     ]);
     return (results[0], results[1]);
