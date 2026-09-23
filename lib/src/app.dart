@@ -52,21 +52,27 @@ class _DashboardAppState extends State<DashboardApp> {
                 icon: Icons.link_off,
                 title: 'No session',
                 message: '${widget.initError}')
-            : _RoleGate(session: widget.session, theme: _theme),
+            : RoleGate(session: widget.session, theme: _theme),
       ),
     );
   }
 }
 
-class _RoleGate extends StatelessWidget {
+/// The shell for an admin or manager; a "Not authorized" page otherwise.
+class RoleGate extends StatelessWidget {
   final DashboardSession session;
   final ThemeController theme;
-  const _RoleGate({required this.session, required this.theme});
+
+  /// Passed on to [DashboardShell.data].
+  final DashboardData? data;
+
+  const RoleGate(
+      {super.key, required this.session, required this.theme, this.data});
 
   @override
   Widget build(BuildContext context) {
     if (session.isAdmin || session.isManager) {
-      return DashboardShell(session: session, theme: theme);
+      return DashboardShell(session: session, theme: theme, data: data);
     }
     return const _MessagePage(
       icon: Icons.lock_outline,

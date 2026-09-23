@@ -10,6 +10,15 @@ DashboardSession fakeAdminSession() => DashboardSession()
   ..username = 'admin'
   ..domain = '';
 
+/// A signed-in non-admin holding [roles] (e.g. `manager`), invented.
+DashboardSession fakeSession(String username, List<String> roles) =>
+    DashboardSession()
+      ..username = username
+      ..domain = ''
+      ..user = (sci.User()
+        ..name = username
+        ..roles.addAll(roles));
+
 /// Every panel's data, invented. Dates carry no zone suffix so they render
 /// the same whatever the machine's time zone; the usage report states its
 /// own window, so the screen does not depend on today's date either.

@@ -19,6 +19,10 @@ class DashboardColors extends ThemeExtension<DashboardColors> {
   final Color neutralBg;
   final Color neutralFg;
 
+  /// Link text (`link`): blue in both themes, so a link never reads as a
+  /// primary action.
+  final Color link;
+
   const DashboardColors({
     required this.okBg,
     required this.okFg,
@@ -30,6 +34,7 @@ class DashboardColors extends ThemeExtension<DashboardColors> {
     required this.infoFg,
     required this.neutralBg,
     required this.neutralFg,
+    required this.link,
   });
 
   // Tercen status tokens (tercen-style tokens.json): each pair is the
@@ -46,6 +51,7 @@ class DashboardColors extends ThemeExtension<DashboardColors> {
     infoFg: TercenTokens.darkOnInfoContainer,
     neutralBg: TercenTokens.darkSurfaceContainer,
     neutralFg: TercenTokens.darkTextTertiary,
+    link: TercenTokens.darkLink,
   );
 
   static const light = DashboardColors(
@@ -59,6 +65,7 @@ class DashboardColors extends ThemeExtension<DashboardColors> {
     infoFg: TercenTokens.lightOnInfoContainer,
     neutralBg: TercenTokens.lightSurfaceContainer,
     neutralFg: TercenTokens.lightTextTertiary,
+    link: TercenTokens.lightLink,
   );
 
   @override
@@ -73,6 +80,7 @@ class DashboardColors extends ThemeExtension<DashboardColors> {
     Color? infoFg,
     Color? neutralBg,
     Color? neutralFg,
+    Color? link,
   }) {
     return DashboardColors(
       okBg: okBg ?? this.okBg,
@@ -85,6 +93,7 @@ class DashboardColors extends ThemeExtension<DashboardColors> {
       infoFg: infoFg ?? this.infoFg,
       neutralBg: neutralBg ?? this.neutralBg,
       neutralFg: neutralFg ?? this.neutralFg,
+      link: link ?? this.link,
     );
   }
 
@@ -102,6 +111,7 @@ class DashboardColors extends ThemeExtension<DashboardColors> {
       infoFg: Color.lerp(infoFg, other.infoFg, t)!,
       neutralBg: Color.lerp(neutralBg, other.neutralBg, t)!,
       neutralFg: Color.lerp(neutralFg, other.neutralFg, t)!,
+      link: Color.lerp(link, other.link, t)!,
     );
   }
 }
@@ -272,6 +282,10 @@ class DashboardTheme {
         background: TercenTokens.darkBackground,
         panel: TercenTokens.darkPanelBg,
         muted: TercenTokens.darkOnSurfaceMuted,
+        // visual-style-dark Table Row: hover neutral-800, selected
+        // primary-dark-surface.
+        rowHover: TercenTokens.darkSurfaceContainer,
+        rowSelected: TercenTokens.darkPrimaryBg,
         colors: DashboardColors.dark,
       );
 
@@ -315,11 +329,16 @@ class DashboardTheme {
         background: TercenTokens.lightBackground,
         panel: TercenTokens.lightPanelBg,
         muted: TercenTokens.lightOnSurfaceMuted,
+        // visual-style-light Table Row: hover neutral-50, selected
+        // primary-bg.
+        rowHover: TercenTokens.lightSurfaceContainerLow,
+        rowSelected: TercenTokens.lightPrimaryBg,
         colors: DashboardColors.light,
       );
 
-  /// [background] is the page behind the surfaces, [panel] the left rail
-  /// and [muted] the caption ink: tokens with no ColorScheme slot.
+  /// [background] is the page behind the surfaces, [panel] the left rail,
+  /// [muted] the caption ink and [rowHover] / [rowSelected] the table-row
+  /// states: tokens with no ColorScheme slot.
   static const _font = TercenTokens.fontFamily;
 
   static ThemeData _build({
@@ -328,6 +347,8 @@ class DashboardTheme {
     required Color background,
     required Color panel,
     required Color muted,
+    required Color rowHover,
+    required Color rowSelected,
     required DashboardColors colors,
   }) {
     final ink = scheme.onSurface;
@@ -377,6 +398,12 @@ class DashboardTheme {
       ),
       dataTableTheme: DataTableThemeData(
         headingRowColor: WidgetStatePropertyAll(scheme.surfaceContainerLow),
+        // Table Row: rows sit on the surface, not on the page ground.
+        dataRowColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) return rowSelected;
+          if (states.contains(WidgetState.hovered)) return rowHover;
+          return scheme.surface;
+        }),
         headingTextStyle: TextStyle(
           fontFamily: _font,
           color: scheme.onSurfaceVariant,

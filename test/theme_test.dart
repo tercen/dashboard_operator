@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:tercen_dashboard/src/screens/tasks_screen.dart';
 import 'package:tercen_dashboard/src/theme.dart';
 import 'package:tercen_dashboard/src/widgets.dart';
 
@@ -49,6 +50,8 @@ void main() {
       'info': 0xFF0E7490,
       'infoContainer': 0xFFCFFAFE,
       'textTertiary': 0xFF4B5563,
+      'link': 0xFF2563EB,
+      'primaryBg': 0xFFEFF6FF,
     },
     Brightness.dark: {
       'primary': 0xFF14B8A6,
@@ -77,6 +80,8 @@ void main() {
       'info': 0xFF60A5FA,
       'infoContainer': 0xFF083344,
       'textTertiary': 0xFF9CA3AF,
+      'link': 0xFF60A5FA,
+      'primaryBg': 0xFF122E35,
     },
   };
 
@@ -118,6 +123,25 @@ void main() {
         expect(theme.dataTableTheme.headingRowColor?.resolve({}),
             token('surfaceContainerLow'));
         expect(theme.cardTheme.color, token('surface'));
+      });
+
+      test('table rows sit on the surface, not the page ground', () {
+        // visual-style Table Row: white / neutral-900, hover neutral-50 /
+        // neutral-800, selected primary-bg / primary-dark-surface.
+        final rows = theme.dataTableTheme.dataRowColor!;
+        expect(rows.resolve({}), token('surface'));
+        expect(rows.resolve({}), isNot(theme.scaffoldBackgroundColor));
+        expect(rows.resolve({WidgetState.hovered}),
+            token(theme.brightness == Brightness.dark
+                ? 'surfaceContainer'
+                : 'surfaceContainerLow'));
+        expect(rows.resolve({WidgetState.selected}), token('primaryBg'));
+      });
+
+      test('links are the link token, not primary', () {
+        final c = theme.extension<DashboardColors>()!;
+        expect(c.link, token('link'));
+        expect(c.link, isNot(scheme.primary));
       });
 
       test('muted text is onSurfaceMuted, never a border colour', () {
@@ -197,5 +221,24 @@ void main() {
     expect(onBlack.$1, isNot(onWhite.$1),
         reason: "a chip must not reuse one theme's ground on the other");
     expect(onBlack.$2, isNot(onWhite.$2));
+  });
+
+  testWidgets('LinkText paints in the link token in both themes',
+      (tester) async {
+    for (final (theme, link) in [
+      (DashboardTheme.dark, const Color(0xFF60A5FA)),
+      (DashboardTheme.light, const Color(0xFF2563EB)),
+    ]) {
+      await tester.pumpWidget(MaterialApp(
+        theme: theme,
+        home: const Scaffold(
+            body: LinkText(text: 'workflow', url: 'https://example.test/')),
+      ));
+      await tester.pumpAndSettle(); // MaterialApp animates theme changes.
+      final text = tester.widget<Text>(find.text('workflow'));
+      expect(text.style?.color, link);
+      final icon = tester.widget<Icon>(find.byIcon(Icons.open_in_new));
+      expect(icon.color, link);
+    }
   });
 }

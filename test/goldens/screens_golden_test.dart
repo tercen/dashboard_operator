@@ -5,11 +5,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:tercen_dashboard/src/app.dart';
+import 'package:tercen_dashboard/src/session.dart';
 import 'package:tercen_dashboard/src/theme.dart';
 
 import '../support/fake_data.dart';
 
-/// Every screen, in both themes, on invented data (test/support). The PNGs
+/// Every screen, in both themes, on invented data (test/support), plus the
+/// narrow layout with its drawer open, the "Not authorized" page and the
+/// manager's shell. The PNGs
 /// under test/goldens/ are what the Tercen colour scheme looks like; update
 /// them with `flutter test --update-goldens test/goldens`.
 void main() {
@@ -33,44 +36,100 @@ void main() {
   ]) {
     for (final section in sections) {
       testWidgets('$section, $name theme', (tester) async {
-        tester.view
-          ..physicalSize = const Size(1280, 800)
-          ..devicePixelRatio = 1;
-        addTearDown(tester.view.reset);
-
-        final theme = ThemeController();
-        addTearDown(theme.dispose);
-
-        await tester.pumpWidget(MaterialApp(
-          debugShowCheckedModeBanner: false,
-          theme: DashboardTheme.light,
-          darkTheme: DashboardTheme.dark,
-          themeMode: mode,
-          home: DashboardShell(
-            session: fakeAdminSession(),
-            theme: theme,
-            data: FakeDashboardData(),
-          ),
-        ));
+        await _pumpApp(tester, mode, fakeAdminSession());
         await tester.tap(find.descendant(
             of: find.byType(NavigationRail), matching: find.text(section)));
-        // Load, then let the workflow-name lookups resolve.
-        for (var i = 0; i < 4; i++) {
-          await tester.pump();
-        }
+        await tester.pumpAndSettle();
 
-        await expectLater(
-          find.byType(MaterialApp),
-          matchesGoldenFile(
-              '${section.toLowerCase()}_$name.png'),
-        );
-
-        // Panels refresh on a timer; unmount so none outlives the test.
-        await tester.pumpWidget(const SizedBox.shrink());
+        // The capture shows the screen that was asked for, not a frame of
+        // the rail still moving off Overview.
+        _expectSelected(tester, sections.indexOf(section));
+        await _expectGolden('${section.toLowerCase()}_$name.png');
+        await _unmount(tester);
       });
     }
+
+    testWidgets('narrow layout, drawer open, $name theme', (tester) async {
+      await _pumpApp(tester, mode, fakeAdminSession(),
+          size: const Size(390, 844));
+      expect(find.byType(NavigationRail), findsNothing);
+      await tester.tap(find.byTooltip('Open navigation menu'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(Drawer), findsOneWidget);
+      await _expectGolden('narrow_drawer_$name.png');
+      await _unmount(tester);
+    });
+
+    testWidgets('not authorized, $name theme', (tester) async {
+      await _pumpApp(tester, mode, fakeSession('ada', const []));
+
+      expect(find.text('Not authorized'), findsOneWidget);
+      expect(find.byType(DashboardShell), findsNothing);
+      await _expectGolden('not_authorized_$name.png');
+      await _unmount(tester);
+    });
+
+    testWidgets('manager shell, $name theme', (tester) async {
+      await _pumpApp(tester, mode, fakeSession('grace', const ['manager']));
+
+      // A manager without admin gets the usage views only.
+      final rail =
+          tester.widget<NavigationRail>(find.byType(NavigationRail));
+      expect(rail.destinations, hasLength(1));
+      expect(find.text('Usage'), findsWidgets);
+      _expectSelected(tester, 0);
+      await _expectGolden('manager_$name.png');
+      await _unmount(tester);
+    });
   }
 }
+
+/// The real app below the session: [RoleGate] picks the shell or the
+/// "Not authorized" page, as it does in the browser. Pumped to rest.
+Future<void> _pumpApp(
+  WidgetTester tester,
+  ThemeMode mode,
+  DashboardSession session, {
+  Size size = const Size(1280, 800),
+}) async {
+  tester.view
+    ..physicalSize = size
+    ..devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
+
+  final theme = ThemeController();
+  addTearDown(theme.dispose);
+
+  await tester.pumpWidget(MaterialApp(
+    debugShowCheckedModeBanner: false,
+    theme: DashboardTheme.light,
+    darkTheme: DashboardTheme.dark,
+    themeMode: mode,
+    home: RoleGate(
+      session: session,
+      theme: theme,
+      data: FakeDashboardData(),
+    ),
+  ));
+  // Load, let the workflow-name lookups resolve, and finish every
+  // transition before anything is captured.
+  await tester.pumpAndSettle();
+}
+
+void _expectSelected(WidgetTester tester, int index) {
+  final rail = tester.widget<NavigationRail>(find.byType(NavigationRail));
+  expect(rail.selectedIndex, index);
+  expect(tester.binding.hasScheduledFrame, isFalse,
+      reason: 'an animation is still running');
+}
+
+Future<void> _expectGolden(String file) => expectLater(
+    find.byType(MaterialApp), matchesGoldenFile(file));
+
+/// Panels refresh on a timer; unmount so none outlives the test.
+Future<void> _unmount(WidgetTester tester) =>
+    tester.pumpWidget(const SizedBox.shrink());
 
 /// `flutter test` draws every glyph as a box unless fonts are loaded:
 /// load the app's own (Fira Sans, Material Icons) from the font manifest.
