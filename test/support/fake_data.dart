@@ -215,7 +215,6 @@ class FakeDashboardData extends DashboardData {
               roles: roles,
               isValidated: validated,
               createdDate: created,
-              instance: domain,
               tags: tags,
               projectsOwned: owned,
               projectsOwnedReported: true,
@@ -372,8 +371,40 @@ class ManyUsersData extends FakeDashboardData {
               roles: i % 7 == 1 ? ['user', 'manager'] : ['user'],
               isValidated: i % 5 != 2,
               createdDate: '2026-09-01T12:00:00',
-              instance: i.isEven ? 'north' : '',
             ),
         ],
       );
+}
+
+/// [FakeDashboardData] with one more user, `tagged`, whose tags are [tags]:
+/// many tags, or one very long one, to show the Tags cell stays bounded.
+class TaggedUsersData extends FakeDashboardData {
+  final List<String> tags;
+  TaggedUsersData(this.tags);
+
+  @override
+  Future<UserListing> users({int limit = UserRows.serverMaxLimit}) async {
+    final listing = await super.users(limit: limit);
+    return UserListing(
+      viaFallback: false,
+      limit: limit,
+      total: listing.users.length + 1,
+      truncated: false,
+      users: [
+        ...listing.users,
+        DashboardUser(
+          id: 'user-tagged',
+          name: 'tagged',
+          email: 'tagged@example.test',
+          domain: '',
+          roles: const ['user'],
+          isValidated: true,
+          createdDate: '2026-09-21T09:00:00',
+          tags: tags,
+          projectsOwned: 2,
+          projectsOwnedReported: true,
+        ),
+      ],
+    );
+  }
 }

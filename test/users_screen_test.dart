@@ -168,7 +168,6 @@ void main() {
         'VALIDATED',
         'DOMAIN',
         'CREATED',
-        'INSTANCE',
         'PROJECTS OWNED',
         'TAGS',
       ]) {
@@ -188,21 +187,18 @@ void main() {
       expect(find.text('null'), findsNothing);
 
       // No tags or projectsOwned (a server before tercen/sci#1664): those
-      // cells are blank, not 0 and not "unknown". The instance is the
-      // row's domain database.
+      // cells are blank, not 0 and not "unknown".
       expect(_rowTexts(tester, 'user-002'), [
         'user-002',
         'user2@example.test',
         'north',
         '2026-09-01 12:00',
-        'north',
       ]);
       expect(_rowTexts(tester, 'user-003'), [
         'user-003',
         'user3@example.test',
         'default',
         '2026-09-01 12:00',
-        'default',
       ]);
       expect(find.byKey(const Key('projects-owned-unknown')), findsNothing);
 
@@ -330,7 +326,7 @@ void main() {
       expect(find.text('—'), findsOneWidget);
 
       // Every column is there; the ones this server cannot fill are blank.
-      for (final column in ['ROLES', 'INSTANCE', 'PROJECTS OWNED', 'TAGS']) {
+      for (final column in ['ROLES', 'PROJECTS OWNED', 'TAGS']) {
         expect(find.text(column), findsOneWidget);
       }
       expect(find.byTooltip('Change roles'), findsNWidgets(12));
@@ -339,7 +335,6 @@ void main() {
         'user12@example.test',
         'north',
         '2026-09-01 12:00',
-        'north',
       ]);
       expect(find.byKey(const Key('projects-owned-unknown')), findsNothing);
 
@@ -373,7 +368,6 @@ void main() {
         'user-a@example.test',
         'default',
         '2026-09-01 12:00',
-        'default',
         '4',
         'pilot',
         'beta',
@@ -384,7 +378,6 @@ void main() {
         'user-b@example.test',
         'north',
         '2026-09-01 12:00',
-        'north',
         '0',
       ]);
       // Not counted: "unknown", not 0 and not blank.
@@ -393,7 +386,6 @@ void main() {
         'user-c@example.test',
         'north',
         '2026-09-01 12:00',
-        'north',
         'unknown',
         'beta',
       ]);
@@ -419,8 +411,6 @@ void main() {
       expect(absent.projectsOwnedReported, isFalse);
       expect(absent.projectsOwned, isNull);
       expect(absent.tags, isNull);
-      expect(absent.instance, isNull);
-      // The Domain column keeps its old reading of the same row.
       expect(absent.domain, '');
 
       final unknown =
@@ -437,8 +427,75 @@ void main() {
       expect(zero.projectsOwnedReported, isTrue);
       expect(zero.projectsOwned, 0);
       expect(zero.tags, isEmpty);
-      expect(zero.instance, 'north');
+      expect(zero.domain, 'north');
     });
+
+    test('fromJson drops null and non-string tags', () {
+      final user = DashboardUser.fromJson({
+        'name': 'x',
+        'tags': ['pilot', null, 7, '', true, 'beta'],
+      });
+      expect(user.tags, ['pilot', 'beta']);
+    });
+
+    testWidgets('a null tag is not a "null" chip', (tester) async {
+      final rows = _w3Rows();
+      rows[0]['tags'] = [null, 'pilot', 42];
+      await _pump(tester, {'rows': rows, 'total': 3, 'truncated': false});
+
+      expect(_rowTexts(tester, 'user-a').skip(4), ['4', 'pilot']);
+      expect(find.text('null'), findsNothing);
+      expect(find.text('42'), findsNothing);
+      await _unmount(tester);
+    });
+
+    // Unbounded, 30 tags or one 300-character tag made the table several
+    // thousand pixels wide. Bounded, it is at most one Tags cell (three
+    // chips and a "+N") wider than the same table with no tags at all.
+    for (final (label, tags) in [
+      ('30 tags', [for (var i = 1; i <= 30; i++) 'tag-$i']),
+      ('one 300-character tag', ['x' * 300]),
+    ]) {
+      testWidgets('$label keep the table width bounded', (tester) async {
+        const maxCell = 4 * 96.0 + 3 * 4;
+        final untagged = [
+          for (final row in _w3Rows()) {...row, 'tags': <String>[]},
+        ];
+        await _pump(
+            tester, {'rows': untagged, 'total': 3, 'truncated': false});
+        final base = tester.getSize(find.byType(DataTable)).width;
+        await _unmount(tester);
+
+        final rows = _w3Rows();
+        rows[0]['tags'] = tags;
+        rows[2]['tags'] = <String>[];
+        await _pump(tester, {'rows': rows, 'total': 3, 'truncated': false});
+
+        expect(tester.takeException(), isNull);
+        expect(tester.getSize(find.byType(DataTable)).width,
+            lessThanOrEqualTo(base + maxCell));
+        // The cell: at most three chips and a "+N", each chip bounded.
+        final cell = find.ancestor(
+            of: find.text(tags.first), matching: find.byType(Tooltip));
+        expect(tester.getSize(cell).width, lessThanOrEqualTo(maxCell));
+        for (final tag in tags.take(3)) {
+          expect(tester.getSize(find.text(tag)).width, lessThan(96));
+        }
+        if (tags.length > 3) {
+          expect(find.text('tag-4'), findsNothing);
+          expect(
+              tester.widget<Text>(find.descendant(
+                  of: find.byKey(const Key('tags-more')),
+                  matching: find.byType(Text))).data,
+              '+27');
+        } else {
+          expect(find.byKey(const Key('tags-more')), findsNothing);
+        }
+        // The full list is still there, as the cell's tooltip.
+        expect(find.byTooltip(tags.join(', ')), findsOneWidget);
+        await _unmount(tester);
+      });
+    }
   });
 
   group('UserListing.mayHaveMore', () {

@@ -211,8 +211,7 @@ class WorkflowRef {
 
 /// A user row from AdminService.listUsers.
 ///
-/// [instance], [tags] and [projectsOwned] are what the server reports and
-/// nothing more: a key the server does not send stays null, and the table
+/// [tags] and [projectsOwned] are what the server reports and nothing more: a key the server does not send stays null, and the table
 /// leaves its cell blank.
 class DashboardUser {
   final String id;
@@ -223,12 +222,9 @@ class DashboardUser {
   final bool isValidated;
   final String createdDate;
 
-  /// The domain database listUsers read this user from: the row's `domain`
-  /// key, which the server fills from the database it is reading, not from
-  /// `User.domain`. Null when the server did not say (the legacy fallback).
-  final String? instance;
-
-  /// `User.tags`, from a server with tercen/sci#1664; null before it.
+  /// `User.tags`, from a server with tercen/sci#1664; null before it. Only
+  /// the non-empty strings: a null or non-string entry is dropped, so it
+  /// never renders as a "null" chip.
   final List<String>? tags;
 
   /// Live projects the user owns (tercen/sci#1664). Null both when the key
@@ -246,14 +242,12 @@ class DashboardUser {
     required this.roles,
     required this.isValidated,
     required this.createdDate,
-    this.instance,
     this.tags,
     this.projectsOwned,
     this.projectsOwnedReported = false,
   });
 
   factory DashboardUser.fromJson(Map<String, dynamic> m) {
-    final instance = m['domain'];
     final tags = m['tags'];
     final owned = m['projectsOwned'];
     return DashboardUser(
@@ -264,8 +258,12 @@ class DashboardUser {
       roles: ((m['roles'] as List?) ?? []).map((r) => '$r').toList(),
       isValidated: m['isValidated'] == true,
       createdDate: '${m['createdDate'] ?? ''}',
-      instance: instance is String ? instance : null,
-      tags: tags is List ? tags.map((t) => '$t').toList() : null,
+      tags: tags is List
+          ? [
+              for (final t in tags)
+                if (t is String && t.isNotEmpty) t,
+            ]
+          : null,
       projectsOwned: owned is num ? owned.toInt() : null,
       projectsOwnedReported: m.containsKey('projectsOwned'),
     );

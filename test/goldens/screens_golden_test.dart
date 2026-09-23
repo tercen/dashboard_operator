@@ -13,8 +13,8 @@ import '../support/fake_data.dart';
 
 /// Every screen, in both themes, on invented data (test/support), plus the
 /// narrow layout with its drawer open, the "Not authorized" page, the
-/// manager's shell, the Users table paged and truncated, and the Create user
-/// dialog filled in and refused. The PNGs under test/goldens/ are what the
+/// manager's shell, the Users table paged, truncated and with many or very
+/// long tags, and the Create user dialog filled in and refused. The PNGs under test/goldens/ are what the
 /// Tercen colour scheme looks like; update them with
 /// `flutter test --update-goldens test/goldens`.
 void main() {
@@ -87,6 +87,27 @@ void main() {
       await _expectGolden('users_truncated_$name.png');
       await _unmount(tester);
     });
+
+    // A user with 30 tags, and one with a single 300-character tag: the
+    // Tags cell stays bounded — three chips and "+N", each chip cut with an
+    // ellipsis — and the table does not grow past the screen.
+    for (final (state, tags) in [
+      ('many', [for (var i = 1; i <= 30; i++) 'tag-$i']),
+      ('long', [('very-long-tag-' * 22).substring(0, 300)]),
+    ]) {
+      testWidgets('Users, tags $state, $name theme', (tester) async {
+        await _pumpApp(tester, mode, fakeAdminSession(),
+            data: TaggedUsersData(tags));
+        await tester.tap(find.descendant(
+            of: find.byType(NavigationRail), matching: find.text('Users')));
+        await tester.pumpAndSettle();
+
+        expect(find.text('tagged'), findsOneWidget);
+        _expectSelected(tester, sections.indexOf('Users'));
+        await _expectGolden('users_tags_${state}_$name.png');
+        await _unmount(tester);
+      });
+    }
 
     // The Create user dialog, filled in with an invented user, and the same
     // dialog after the server refused it: the error shown, the input kept.

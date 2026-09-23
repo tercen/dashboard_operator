@@ -113,21 +113,53 @@ class _ProjectsOwned extends StatelessWidget {
   }
 }
 
-/// A read-only tag: outlined, so it does not read as a role chip.
+/// A read-only tag: outlined, so it does not read as a role chip. Never
+/// wider than [maxWidth]: a longer tag is cut with an ellipsis.
 class _TagChip extends StatelessWidget {
+  static const maxWidth = 96.0;
   final String tag;
-  const _TagChip(this.tag);
+  const _TagChip(this.tag, {super.key});
 
   @override
   Widget build(BuildContext context) {
     final fg = StateChip.colorsFor(context, Severity.neutral).$2;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
-      decoration: BoxDecoration(
-        border: Border.all(color: fg.withValues(alpha: 0.6)),
-        borderRadius: BorderRadius.circular(999),
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: maxWidth),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+        decoration: BoxDecoration(
+          border: Border.all(color: fg.withValues(alpha: 0.6)),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(tag,
+            maxLines: 1,
+            softWrap: false,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: fg, fontSize: 11.5)),
       ),
-      child: Text(tag, style: TextStyle(color: fg, fontSize: 11.5)),
+    );
+  }
+}
+
+/// The Tags cell, bounded whatever the server sends: the first [shown] tags
+/// as chips, then "+N" for the rest. The full list is the cell's tooltip.
+class _Tags extends StatelessWidget {
+  static const shown = 3;
+  final List<String> tags;
+  const _Tags(this.tags);
+
+  @override
+  Widget build(BuildContext context) {
+    if (tags.isEmpty) return const SizedBox.shrink();
+    final hidden = tags.length - shown;
+    return Tooltip(
+      message: tags.join(', '),
+      // A Row, not a Wrap: the column sizes to its cells, and a Wrap
+      // measured that way stacks its chips.
+      child: Row(mainAxisSize: MainAxisSize.min, spacing: 4, children: [
+        for (final tag in tags.take(shown)) _TagChip(tag),
+        if (hidden > 0) _TagChip('+$hidden', key: const Key('tags-more')),
+      ]),
     );
   }
 }
@@ -229,17 +261,8 @@ class _UsersScreenState extends State<UsersScreen> {
       )),
       DataCell(Text(user.domain.isEmpty ? 'default' : user.domain)),
       DataCell(Text(formatDate(user.createdDate))),
-      DataCell(Text(switch (user.instance) {
-        null => '',
-        '' => 'default',
-        final instance => instance,
-      })),
       DataCell(_ProjectsOwned(user)),
-      // A Row, not a Wrap: the column sizes to its cells, and a Wrap
-      // measured that way stacks its chips.
-      DataCell(Row(mainAxisSize: MainAxisSize.min, spacing: 4, children: [
-        for (final tag in user.tags ?? const <String>[]) _TagChip(tag),
-      ])),
+      DataCell(_Tags(user.tags ?? const [])),
     ]);
   }
 
@@ -366,7 +389,7 @@ class _UsersScreenState extends State<UsersScreen> {
                         },
                   showEmptyRows: false,
                   showFirstLastButtons: true,
-                  // Nine columns: at the default spacing the last ones fall
+                  // Eight columns: at the default spacing the last ones fall
                   // off a laptop-width screen.
                   columnSpacing: 28,
                   columns: const [
@@ -376,7 +399,6 @@ class _UsersScreenState extends State<UsersScreen> {
                     DataColumn(label: Text('VALIDATED')),
                     DataColumn(label: Text('DOMAIN')),
                     DataColumn(label: Text('CREATED')),
-                    DataColumn(label: Text('INSTANCE')),
                     DataColumn(
                         label: Text('PROJECTS OWNED'), numeric: true),
                     DataColumn(label: Text('TAGS')),
