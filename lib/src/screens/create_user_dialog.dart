@@ -9,7 +9,7 @@ final newUserEmailPattern =
     RegExp(r'[-0-9a-zA-Z.+_]+@[-0-9a-zA-Z.+_]+\.[a-zA-Z]{2,4}');
 
 String? validateNewUserName(String? value) =>
-    (value ?? '').isEmpty ? 'A name is required.' : null;
+    (value ?? '').trim().isEmpty ? 'A name is required.' : null;
 
 /// The core dialog's message, word for word.
 String? validateNewUserEmail(String? value) =>

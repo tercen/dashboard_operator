@@ -90,7 +90,19 @@ class _RoleMenu extends StatelessWidget {
 }
 
 class _UsersScreenState extends State<UsersScreen> {
+  final _filterField = TextEditingController();
   String _filter = '';
+
+  /// A user just created, to bring on screen once the reload lists them;
+  /// then the one whose row carries [_revealKey].
+  String? _reveal;
+  String? _revealedName;
+
+  /// The page to open the table at, and a count that rebuilds the table
+  /// there: it goes up each time a created user is brought on screen.
+  int _firstRow = 0;
+  int _revealed = 0;
+  final _revealKey = GlobalKey();
 
   static const _pageSizes = [25, 50, 100];
   int _rowsPerPage = 50;
@@ -98,6 +110,12 @@ class _UsersScreenState extends State<UsersScreen> {
   /// Grantable roles (the server enforces the same list). `user` is the
   /// baseline every account carries and is not offered here.
   static const _roles = ['manager', 'operator', 'admin'];
+
+  @override
+  void dispose() {
+    _filterField.dispose();
+    super.dispose();
+  }
 
   Future<void> _changeRole(BuildContext context, DashboardUser user, String role,
       bool grant, VoidCallback refresh) async {
@@ -119,8 +137,9 @@ class _UsersScreenState extends State<UsersScreen> {
     }
   }
 
-  /// Opens the Create user dialog; after a create, reloads the list so the
-  /// new user is in it.
+  /// Opens the Create user dialog; after a create, clears the filter and
+  /// reloads the list, and the table then opens at the page that holds the
+  /// new user.
   Future<void> _createUser(BuildContext context, VoidCallback refresh) async {
     final created = await showDialog<String>(
       context: context,
@@ -128,6 +147,11 @@ class _UsersScreenState extends State<UsersScreen> {
       builder: (_) => CreateUserDialog(create: widget.data.createUser),
     );
     if (created == null) return;
+    _filterField.clear();
+    setState(() {
+      _filter = '';
+      _reveal = created;
+    });
     refresh();
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -138,7 +162,8 @@ class _UsersScreenState extends State<UsersScreen> {
   DataRow _userRow(
       BuildContext context, DashboardUser user, VoidCallback refresh) {
     return DataRow(cells: [
-      DataCell(Text(user.name)),
+      DataCell(Text(user.name,
+          key: user.name == _revealedName ? _revealKey : null)),
       DataCell(Text(user.email)),
       DataCell(Row(children: [
         Wrap(spacing: 4, children: [
@@ -174,14 +199,17 @@ class _UsersScreenState extends State<UsersScreen> {
         SizedBox(
           width: 240,
           child: TextField(
+            controller: _filterField,
             decoration: const InputDecoration(
               isDense: true,
               prefixIcon: Icon(Icons.search, size: 18),
               hintText: 'Filter by name or email',
               border: OutlineInputBorder(),
             ),
-            onChanged: (value) =>
-                setState(() => _filter = value.toLowerCase()),
+            onChanged: (value) => setState(() {
+              _filter = value.toLowerCase();
+              _firstRow = 0;
+            }),
           ),
         ),
         const SizedBox(width: 8),
@@ -236,6 +264,21 @@ class _UsersScreenState extends State<UsersScreen> {
           );
         }
         final onePage = visible.length < _pageSizes.first;
+        // Once the reload lists the created user, open the table at their
+        // page and scroll their row into view.
+        final at = _reveal == null
+            ? -1
+            : visible.indexWhere((u) => u.name == _reveal);
+        if (at >= 0) {
+          _firstRow = onePage ? 0 : at - at % _rowsPerPage;
+          _revealed++;
+          _revealedName = _reveal;
+          _reveal = null;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            final row = _revealKey.currentContext;
+            if (row != null && row.mounted) Scrollable.ensureVisible(row);
+          });
+        }
         return SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -250,8 +293,10 @@ class _UsersScreenState extends State<UsersScreen> {
                   ),
                 ),
                 child: PaginatedDataTable(
-                  // A new filter starts again at the first page.
-                  key: ValueKey(_filter),
+                  // A new filter starts again at the first page; a created
+                  // user opens it at theirs.
+                  key: ValueKey((_filter, _revealed)),
+                  initialFirstRowIndex: _firstRow,
                   // The table keeps a full page of height below the last
                   // row, so a list that fits on one page gets a page of its
                   // own size: the pager then sits under the rows, not a

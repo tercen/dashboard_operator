@@ -26,14 +26,16 @@ class _FakeResponse implements http_api.Response {
 }
 
 /// A server with invented users. listUsers answers [rows]; createUser adds
-/// the user to them and answers it — or, when [refusal] is set, answers
-/// that error instead, as the server reports one.
+/// the user to them, first or with [appendCreated] last, and answers it —
+/// or, when [refusal] is set, answers that error instead, as the server
+/// reports one.
 class _UsersClient implements http_api.HttpClient {
   final List<Map<String, Object?>> rows;
   final List<String> calls = [];
   final List<Map> created = [];
   final List<String> passwords = [];
   Map<String, Object?>? refusal;
+  bool appendCreated = false;
   _UsersClient(this.rows);
 
   final _codec = ContentCodec.tson();
@@ -57,13 +59,13 @@ class _UsersClient implements http_api.HttpClient {
             statusCode: refusal!['statusCode'] as int,
             headers: {'content-type': _codec.contentType});
       }
-      rows.insert(0, {
+      rows.insert(appendCreated ? rows.length : 0, {
         'id': user['name'],
         'name': user['name'],
         'email': user['email'],
         'domain': '',
         'roles': ['user'],
-        'isValidated': false,
+        'isValidated': user['isValidated'],
         'createdDate': '2026-09-23T09:00:00',
       });
       return _FakeResponse(_codec.encode(user));
@@ -97,8 +99,10 @@ class _UsersData extends DashboardData {
   AdminApi get adminApi => AdminApi(_base, client);
 }
 
-List<Map<String, Object?>> _rows() => [
-      for (final name in ['ada', 'grace', 'linus'])
+List<Map<String, Object?>> _rows(
+        [List<String> names = const ['ada', 'grace', 'linus']]) =>
+    [
+      for (final name in names)
         {
           'id': 'id-$name',
           'name': name,
@@ -111,8 +115,9 @@ List<Map<String, Object?>> _rows() => [
     ];
 
 Future<_UsersData> _pump(WidgetTester tester,
-    {DashboardSession? session}) async {
-  final data = await _UsersData.create(session ?? fakeAdminSession(), _rows());
+    {DashboardSession? session, List<Map<String, Object?>>? rows}) async {
+  final data = await _UsersData.create(
+      session ?? fakeAdminSession(), rows ?? _rows());
   tester.view
     ..physicalSize = const Size(1280, 1000)
     ..devicePixelRatio = 1;
@@ -130,6 +135,9 @@ Future<void> _unmount(WidgetTester tester) =>
     tester.pumpWidget(const SizedBox());
 
 Future<void> _open(WidgetTester tester) async {
+  // The button scrolls with the list: back to it, as the admin would.
+  await tester.ensureVisible(find.text('Create user'));
+  await tester.pumpAndSettle();
   await tester.tap(find.text('Create user'));
   await tester.pumpAndSettle();
   expect(find.byType(CreateUserDialog), findsOneWidget);
@@ -146,6 +154,37 @@ Future<void> _fill(WidgetTester tester,
 Future<void> _submit(WidgetTester tester) async {
   await tester.tap(find.widgetWithText(FilledButton, 'Create'));
   await tester.pumpAndSettle();
+}
+
+/// 120 invented users: three pages of 50.
+List<Map<String, Object?>> _manyRows() => _rows([
+      for (var i = 1; i <= 120; i++) 'user-${'$i'.padLeft(3, '0')}',
+    ]);
+
+Future<void> _nextPage(WidgetTester tester) async {
+  await tester.ensureVisible(find.byTooltip('Next page'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byTooltip('Next page'));
+  await tester.pumpAndSettle();
+}
+
+/// [text] is built once and lies inside the scrolling list's viewport.
+void _expectOnScreen(WidgetTester tester, String text) {
+  final found = find.text(text);
+  expect(found, findsOneWidget);
+  final viewport = tester.getRect(find
+      .ancestor(of: found, matching: find.byType(SingleChildScrollView))
+      .last);
+  expect(viewport.contains(tester.getCenter(found)), isTrue,
+      reason: '$text at ${tester.getCenter(found)}, viewport $viewport');
+}
+
+Future<void> _createNewUser(WidgetTester tester) async {
+  await _open(tester);
+  await _fill(tester,
+      name: 'new-user', email: 'new.user@example.test', password: 'secret');
+  await _submit(tester);
+  expect(find.byType(CreateUserDialog), findsNothing);
 }
 
 String _fieldText(WidgetTester tester, String key) => tester
@@ -178,6 +217,7 @@ void main() {
 
     test('name and password are required', () {
       expect(validateNewUserName(''), 'A name is required.');
+      expect(validateNewUserName('   '), 'A name is required.');
       expect(validateNewUserName('new-user'), isNull);
       expect(validateNewUserPassword(''), 'A password is required.');
       expect(validateNewUserPassword('invented-secret'), isNull);
@@ -245,6 +285,62 @@ void main() {
     }
     expect(find.byTooltip('Change roles'), findsNWidgets(4));
     await _unmount(tester);
+  });
+
+  group('after a create the new row is on screen', () {
+    testWidgets('from page 2, when the new user lists first', (tester) async {
+      await _pump(tester, rows: _manyRows());
+      await _nextPage(tester);
+      expect(find.text('51–100 of 120'), findsOneWidget);
+
+      await _createNewUser(tester);
+      expect(find.text('Showing 121 of 121 users'), findsOneWidget);
+      expect(find.text('1–50 of 121'), findsOneWidget);
+      _expectOnScreen(tester, 'new-user');
+      await _unmount(tester);
+    });
+
+    testWidgets('from page 2, when the new user lists last', (tester) async {
+      final data = await _pump(tester, rows: _manyRows());
+      data.client.appendCreated = true;
+      await _nextPage(tester);
+
+      await _createNewUser(tester);
+      expect(find.text('101–121 of 121'), findsOneWidget);
+      _expectOnScreen(tester, 'new-user');
+      await _unmount(tester);
+    });
+
+    testWidgets('with a filter the new user does not match', (tester) async {
+      await _pump(tester, rows: _manyRows());
+      await tester.enterText(find.byType(TextField).first, 'user-07');
+      await tester.pumpAndSettle();
+      expect(find.text('Showing 10 of 120 users'), findsOneWidget);
+
+      await _createNewUser(tester);
+      // The filter is cleared, so the new row is not hidden by it.
+      expect(find.text('Showing 121 of 121 users'), findsOneWidget);
+      expect(
+          tester.widget<TextField>(find.byType(TextField).first)
+              .controller!
+              .text,
+          isEmpty);
+      _expectOnScreen(tester, 'new-user');
+      await _unmount(tester);
+    });
+
+    testWidgets('a later reload keeps the page the admin is on',
+        (tester) async {
+      await _pump(tester, rows: _manyRows());
+      await _createNewUser(tester);
+      await _nextPage(tester);
+      expect(find.text('51–100 of 121'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Refresh'));
+      await tester.pumpAndSettle();
+      expect(find.text('51–100 of 121'), findsOneWidget);
+      await _unmount(tester);
+    });
   });
 
   testWidgets('a server error is shown and the input is kept',
