@@ -72,8 +72,7 @@ class SettingsScreen extends StatelessWidget {
                 'allowlist, so a newly added key is withheld by default.',
                 style: Theme.of(context)
                     .textTheme
-                    .bodySmall
-                    ?.copyWith(color: Theme.of(context).colorScheme.outline),
+                    .bodySmall,
               ),
               const SizedBox(height: 8),
               _Table(values: snap.config),
@@ -101,8 +100,10 @@ class _Table extends StatelessWidget {
         children: [
           for (final entry in values.entries)
             Container(
-              padding: const EdgeInsets.symmetric(vertical: 7),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
               decoration: BoxDecoration(
+                // Table Row: on the surface, not on the page ground.
+                color: Theme.of(context).colorScheme.surface,
                 border: Border(
                     bottom: BorderSide(
                         color: Theme.of(context).colorScheme.outline)),
