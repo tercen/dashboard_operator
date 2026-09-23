@@ -75,11 +75,16 @@ class DashboardData {
   /// Falls back to that released query when the server has no AdminService,
   /// so this panel still works against an older Tercen (where it is the
   /// only option, empty or not).
-  Future<UserListing> users({int limit = 500}) async {
+  Future<UserListing> users({int limit = UserRows.serverMaxLimit}) async {
     try {
-      final rows = await adminApi.listUsers(limit: limit);
+      final answer = await adminApi.listUsers(limit: limit);
       return UserListing(
-          users: rows.map(DashboardUser.fromJson).toList(), viaFallback: false);
+        users: answer.rows.map(DashboardUser.fromJson).toList(),
+        viaFallback: false,
+        limit: limit,
+        total: answer.total,
+        truncated: answer.truncated,
+      );
     } on ServiceError catch (e) {
       if (e.statusCode != 404) rethrow;
       final legacy = await _f.userService
@@ -98,6 +103,7 @@ class DashboardData {
                 ))
             .toList(),
         viaFallback: true,
+        limit: limit,
       );
     }
   }
@@ -152,10 +158,32 @@ class DashboardData {
 /// AdminService the panel falls back to findUserByCreatedDateAndName,
 /// which returns nothing on some instances — an empty list then means
 /// "the old query found none", not "there are no users".
+///
+/// [total] and [truncated] are null when the server does not report them
+/// (before tercen/sci#1663, and always on the fallback).
 class UserListing {
   final List<DashboardUser> users;
   final bool viaFallback;
-  const UserListing({required this.users, required this.viaFallback});
+
+  /// The limit the list was requested with.
+  final int limit;
+  final int? total;
+  final bool? truncated;
+
+  const UserListing({
+    required this.users,
+    required this.viaFallback,
+    this.limit = UserRows.serverMaxLimit,
+    this.total,
+    this.truncated,
+  });
+
+  /// Whether users exist beyond [users]: the server says so, or — when it
+  /// reports nothing — the list filled the whole [limit], so it may have
+  /// stopped there.
+  bool get mayHaveMore =>
+      truncated ??
+      (total != null ? users.length < total! : users.length >= limit);
 }
 
 /// A workflow's name and step names, for rendering task provenance.

@@ -1,5 +1,6 @@
 import 'package:sci_tercen_client/sci_client.dart' as sci;
 
+import 'package:tercen_dashboard/src/admin_api.dart';
 import 'package:tercen_dashboard/src/data.dart';
 import 'package:tercen_dashboard/src/session.dart';
 import 'package:tercen_dashboard/src/usage.dart';
@@ -188,8 +189,12 @@ class FakeDashboardData extends DashboardData {
       ];
 
   @override
-  Future<UserListing> users({int limit = 500}) async => UserListing(
+  Future<UserListing> users({int limit = UserRows.serverMaxLimit}) async =>
+      UserListing(
         viaFallback: false,
+        limit: limit,
+        total: 5,
+        truncated: false,
         users: [
           for (final (name, domain, roles, validated, created) in [
             ('admin', '', ['admin'], true, '2025-01-10T09:00:00'),

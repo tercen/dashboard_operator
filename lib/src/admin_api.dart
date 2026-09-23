@@ -94,11 +94,20 @@ class AdminApi {
       _jsonCall('api/v1/admin/findActivities', {'limit': limit});
 
   /// POST api/v1/admin/listUsers — users across domains.
-  Future<List<Map<String, dynamic>>> listUsers({int limit = 500}) async {
+  ///
+  /// A server with tercen/sci#1663 adds `total` and `truncated` beside
+  /// `rows`; an older one sends `rows` only, and both come back null.
+  Future<UserRows> listUsers({int limit = UserRows.serverMaxLimit}) async {
     final report = await _jsonCall('api/v1/admin/listUsers', {'limit': limit});
-    return ((report['rows'] as List?) ?? [])
-        .map((r) => Map<String, dynamic>.from(r as Map))
-        .toList();
+    final total = report['total'];
+    final truncated = report['truncated'];
+    return UserRows(
+      rows: ((report['rows'] as List?) ?? [])
+          .map((r) => Map<String, dynamic>.from(r as Map))
+          .toList(),
+      total: total is num ? total.toInt() : null,
+      truncated: truncated is bool ? truncated : null,
+    );
   }
 
   /// POST api/v1/admin/grantRole | revokeRole — returns the new role list.
@@ -165,4 +174,16 @@ class AdminApi {
       return ServiceError(status, 'admin.api', 'HTTP $status');
     }
   }
+}
+
+/// The listUsers answer: the rows, and — from a server that reports them —
+/// how many users exist and whether [rows] stops short of that.
+class UserRows {
+  /// The most rows listUsers returns until tercen/sci#1663 lifts the cap.
+  static const serverMaxLimit = 1000;
+
+  final List<Map<String, dynamic>> rows;
+  final int? total;
+  final bool? truncated;
+  const UserRows({required this.rows, this.total, this.truncated});
 }
