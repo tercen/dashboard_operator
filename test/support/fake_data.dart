@@ -1,5 +1,6 @@
 import 'package:sci_tercen_client/sci_client.dart' as sci;
 
+import 'package:tercen_dashboard/src/admin_api.dart';
 import 'package:tercen_dashboard/src/data.dart';
 import 'package:tercen_dashboard/src/session.dart';
 import 'package:tercen_dashboard/src/usage.dart';
@@ -188,8 +189,12 @@ class FakeDashboardData extends DashboardData {
       ];
 
   @override
-  Future<UserListing> users({int limit = 500}) async => UserListing(
+  Future<UserListing> users({int limit = UserRows.serverMaxLimit}) async =>
+      UserListing(
         viaFallback: false,
+        limit: limit,
+        total: 5,
+        truncated: false,
         users: [
           for (final (name, domain, roles, validated, created) in [
             ('admin', '', ['admin'], true, '2025-01-10T09:00:00'),
@@ -332,4 +337,34 @@ class FakeDashboardData extends DashboardData {
         'tercen.signup.enabled': 'true',
         'tercen.storage.backend': 'object-store',
       };
+}
+
+/// [FakeDashboardData] with [count] invented users (`user-001`…) on the
+/// Users page, reported with [total] and [truncated] as the server would.
+class ManyUsersData extends FakeDashboardData {
+  final int count;
+  final int? total;
+  final bool? truncated;
+  ManyUsersData(this.count, {this.total, this.truncated});
+
+  @override
+  Future<UserListing> users({int limit = UserRows.serverMaxLimit}) async =>
+      UserListing(
+        viaFallback: false,
+        limit: limit,
+        total: total,
+        truncated: truncated,
+        users: [
+          for (var i = 1; i <= count; i++)
+            DashboardUser(
+              id: 'id-$i',
+              name: 'user-${i.toString().padLeft(3, '0')}',
+              email: 'user$i@example.test',
+              domain: i.isEven ? 'north' : '',
+              roles: i % 7 == 1 ? ['user', 'manager'] : ['user'],
+              isValidated: i % 5 != 2,
+              createdDate: '2026-09-01T12:00:00',
+            ),
+        ],
+      );
 }

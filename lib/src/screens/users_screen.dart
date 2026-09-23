@@ -3,6 +3,52 @@ import 'package:flutter/material.dart';
 import '../data.dart';
 import '../widgets.dart';
 
+/// The count line above the table. [shown] is the number of rows left after
+/// the filter. The total is the server's when it reports one; otherwise it
+/// is the number of users loaded, and the line says the total is unknown.
+/// It claims only what the response supports: a server that says the list is
+/// truncated but gives no total has not said why, so the line does not blame
+/// the limit.
+String showingBanner(UserListing listing, int shown) {
+  final loaded = listing.users.length;
+  final total = listing.total;
+  if (total != null) {
+    return listing.mayHaveMore
+        ? 'Showing $shown of $total users — the server returned only the '
+            'first $loaded'
+        : 'Showing $shown of $total users';
+  }
+  if (listing.truncated == true) {
+    return 'Showing $shown of the first $loaded users — the server reported '
+        'the list as incomplete; it does not report a total';
+  }
+  return listing.mayHaveMore
+      ? 'Showing $shown of the first $loaded users — the list stopped at the '
+          'limit of ${listing.limit}; this server does not report a total'
+      : 'Showing $shown of $loaded users loaded; this server does not '
+          'report a total';
+}
+
+/// One page's worth of rows at a time, for [PaginatedDataTable].
+class _UserRows extends DataTableSource {
+  final List<DashboardUser> users;
+  final DataRow Function(DashboardUser user) rowFor;
+  _UserRows(this.users, this.rowFor);
+
+  @override
+  DataRow? getRow(int index) =>
+      index < users.length ? rowFor(users[index]) : null;
+
+  @override
+  int get rowCount => users.length;
+
+  @override
+  bool get isRowCountApproximate => false;
+
+  @override
+  int get selectedRowCount => 0;
+}
+
 class UsersScreen extends StatefulWidget {
   final DashboardData data;
   const UsersScreen({super.key, required this.data});
@@ -45,6 +91,9 @@ class _RoleMenu extends StatelessWidget {
 class _UsersScreenState extends State<UsersScreen> {
   String _filter = '';
 
+  static const _pageSizes = [25, 50, 100];
+  int _rowsPerPage = 50;
+
   /// Grantable roles (the server enforces the same list). `user` is the
   /// baseline every account carries and is not offered here.
   static const _roles = ['manager', 'operator', 'admin'];
@@ -67,6 +116,35 @@ class _UsersScreenState extends State<UsersScreen> {
             .showSnackBar(SnackBar(content: Text('$e')));
       }
     }
+  }
+
+  DataRow _userRow(
+      BuildContext context, DashboardUser user, VoidCallback refresh) {
+    return DataRow(cells: [
+      DataCell(Text(user.name)),
+      DataCell(Text(user.email)),
+      DataCell(Row(children: [
+        Wrap(spacing: 4, children: [
+          for (final role in user.roles)
+            if (role != 'user') StateChip(role),
+        ]),
+        const SizedBox(width: 4),
+        _RoleMenu(
+          roles: user.roles,
+          onChange: (role, grant) =>
+              _changeRole(context, user, role, grant, refresh),
+        ),
+      ])),
+      DataCell(Icon(
+        user.isValidated ? Icons.check_circle_outline : Icons.hourglass_empty,
+        size: 18,
+        color: user.isValidated
+            ? StateChip.colorsFor(context, Severity.ok).$2
+            : StateChip.colorsFor(context, Severity.neutral).$2,
+      )),
+      DataCell(Text(user.domain.isEmpty ? 'default' : user.domain)),
+      DataCell(Text(formatDate(user.createdDate))),
+    ]);
   }
 
   @override
@@ -99,72 +177,80 @@ class _UsersScreenState extends State<UsersScreen> {
                 u.email.toLowerCase().contains(_filter) ||
                 u.domain.toLowerCase().contains(_filter))
             .toList();
+        final theme = Theme.of(context);
+        final banner = Text(showingBanner(listing, visible.length),
+            key: const Key('users-banner'), style: theme.textTheme.bodySmall);
         if (visible.isEmpty) {
-          return Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 520),
-              child: Text(
-                listing.viaFallback
-                    ? 'This server has no AdminService, so the list came from '
-                        'findUserByCreatedDateAndName — a view that returns '
-                        'nothing on some instances (the built-in admin '
-                        'console is empty here too). Upgrade the server for a '
-                        'reliable listing.'
-                    : 'No matching users.',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodySmall,
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              banner,
+              Expanded(
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 520),
+                    child: Text(
+                      listing.viaFallback
+                          ? 'This server has no AdminService, so the list came '
+                              'from findUserByCreatedDateAndName — a view that '
+                              'returns nothing on some instances (the built-in '
+                              'admin console is empty here too). Upgrade the '
+                              'server for a reliable listing.'
+                          : 'No matching users.',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ),
+                ),
               ),
-            ),
+            ],
           );
         }
+        final onePage = visible.length < _pageSizes.first;
         return SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: SingleChildScrollView(
-            child: DataTable(
-              headingTextStyle: Theme.of(context)
-                  .textTheme
-                  .labelSmall
-                  ?.copyWith(letterSpacing: 0.6),
-              columns: const [
-                DataColumn(label: Text('NAME')),
-                DataColumn(label: Text('EMAIL')),
-                DataColumn(label: Text('ROLES')),
-                DataColumn(label: Text('VALIDATED')),
-                DataColumn(label: Text('DOMAIN')),
-                DataColumn(label: Text('CREATED')),
-              ],
-              rows: [
-                for (final user in visible)
-                  DataRow(cells: [
-                    DataCell(Text(user.name)),
-                    DataCell(Text(user.email)),
-                    DataCell(Row(children: [
-                      Wrap(spacing: 4, children: [
-                        for (final role in user.roles)
-                          if (role != 'user') StateChip(role),
-                      ]),
-                      const SizedBox(width: 4),
-                      _RoleMenu(
-                        roles: user.roles,
-                        onChange: (role, grant) =>
-                            _changeRole(context, user, role, grant, refresh),
-                      ),
-                    ])),
-                    DataCell(Icon(
-                      user.isValidated
-                          ? Icons.check_circle_outline
-                          : Icons.hourglass_empty,
-                      size: 18,
-                      color: user.isValidated
-                          ? StateChip.colorsFor(context, Severity.ok).$2
-                          : StateChip.colorsFor(context, Severity.neutral).$2,
-                    )),
-                    DataCell(Text(
-                        user.domain.isEmpty ? 'default' : user.domain)),
-                    DataCell(Text(formatDate(user.createdDate))),
-                  ]),
-              ],
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              banner,
+              const SizedBox(height: 8),
+              Theme(
+                data: theme.copyWith(
+                  dataTableTheme: theme.dataTableTheme.copyWith(
+                    headingTextStyle: theme.textTheme.labelSmall
+                        ?.copyWith(letterSpacing: 0.6),
+                  ),
+                ),
+                child: PaginatedDataTable(
+                  // A new filter starts again at the first page.
+                  key: ValueKey(_filter),
+                  // The table keeps a full page of height below the last
+                  // row, so a list that fits on one page gets a page of its
+                  // own size: the pager then sits under the rows, not a
+                  // screen below them.
+                  rowsPerPage: onePage ? visible.length : _rowsPerPage,
+                  availableRowsPerPage: _pageSizes,
+                  onRowsPerPageChanged: onePage
+                      ? null
+                      : (value) {
+                          if (value != null) {
+                            setState(() => _rowsPerPage = value);
+                          }
+                        },
+                  showEmptyRows: false,
+                  showFirstLastButtons: true,
+                  columns: const [
+                    DataColumn(label: Text('NAME')),
+                    DataColumn(label: Text('EMAIL')),
+                    DataColumn(label: Text('ROLES')),
+                    DataColumn(label: Text('VALIDATED')),
+                    DataColumn(label: Text('DOMAIN')),
+                    DataColumn(label: Text('CREATED')),
+                  ],
+                  source: _UserRows(
+                      visible, (user) => _userRow(context, user, refresh)),
+                ),
+              ),
+            ],
           ),
         );
       },
