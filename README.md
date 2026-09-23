@@ -52,9 +52,10 @@ clean `flutter test` says nothing about `version.json`.
 
 The user menu opens the Dashboard install whose library project was **created
 most recently**, not the one with the highest version. Installing an older
-tag after a newer one therefore makes the older one open. Pulling an existing
-project to a new tag does not change its creation date either. So an upgrade
-leaves exactly one Dashboard install per domain, and that one is at the new tag.
+tag after a newer one therefore makes the older one open. Whether pulling an
+existing project to a new tag changes its creation date has not been checked,
+so the procedure does not rely on it either way. An upgrade leaves exactly one
+Dashboard install per domain, and that one is at the new tag.
 
 ### Procedure
 
@@ -66,8 +67,10 @@ leaves exactly one Dashboard install per domain, and that one is at the new tag.
    and the build output differs, so use the pinned SDK.
 3. **Lift the version check.** If `test/version_test.dart` still has a `skip:`
    on the `build/web/version.json serves the pubspec version` test, delete
-   that line. Run `flutter test test/version_test.dart`. It must run and pass,
-   with no test skipped. Only now do `pubspec.yaml` and `version.json` agree.
+   three lines: the `skip:` line (a single line ending in `,`) and the two
+   `//` comment lines directly above it. Leave the closing `);` in place.
+   Run `flutter test test/version_test.dart`. It must run and pass, with no
+   test skipped. Only now do `pubspec.yaml` and `version.json` agree.
 4. **Prove it:** `flutter analyze` and `flutter test` are clean, with nothing
    skipped.
 5. **Commit** the version bump, `build/web` and the test change together.

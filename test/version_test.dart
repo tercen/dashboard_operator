@@ -30,9 +30,7 @@ void main() {
       expect(servedVersion(), pubspecVersion());
     },
     // The committed build/web predates WP11. README "Release and upgrade",
-    // Procedure step 2 rebuilds it and step 3 deletes this skip.
-    skip: 'committed build/web predates WP11; README "Release and upgrade", '
-        'step 2 rebuilds it and step 3 ("Lift the version check") removes '
-        'this skip',
+    // Procedure step 2 rebuilds it; step 3 deletes these three lines.
+    skip: 'build/web predates WP11; see README release procedure step 3',
   );
 }
