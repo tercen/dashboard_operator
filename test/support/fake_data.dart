@@ -7,6 +7,7 @@ import 'package:tercen_dashboard/src/data.dart';
 import 'package:tercen_dashboard/src/session.dart';
 import 'package:tercen_dashboard/src/usage.dart';
 import 'package:tercen_dashboard/src/user_activity.dart';
+import 'package:tercen_dashboard/src/user_document.dart';
 import 'package:tercen_dashboard/src/user_filters.dart';
 
 /// A signed-in admin, without a server: enough for the role gate and the
@@ -231,6 +232,18 @@ class FakeDashboardData extends DashboardData {
             ),
         ],
       );
+
+  /// An invented stored document for any user: ada's tags, and a field the
+  /// pinned client does not know.
+  @override
+  Future<UserDocument> userDocument(String userId) async => UserDocument({
+        'kind': 'User',
+        'id': userId,
+        'rev': '3-invented',
+        'name': userId.replaceFirst('user-', ''),
+        'tags': ['pilot', 'cytometry'],
+        'fieldUnknownToTheClient': {'kept': true},
+      });
 
   /// Invented activity for [users]: ada has ten objects — a deleted
   /// workflow and a file whose project is gone among them — and more
