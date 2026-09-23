@@ -29,7 +29,10 @@ void main() {
     () {
       expect(servedVersion(), pubspecVersion());
     },
-    // Lifted when build/web is rebuilt at the new version (see the PR).
-    skip: 'build/web not yet rebuilt at 0.6.0',
+    // The committed build/web predates WP11. README "Release and upgrade",
+    // Procedure step 2 rebuilds it and step 3 deletes this skip.
+    skip: 'committed build/web predates WP11; README "Release and upgrade", '
+        'step 2 rebuilds it and step 3 ("Lift the version check") removes '
+        'this skip',
   );
 }
