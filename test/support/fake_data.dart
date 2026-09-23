@@ -7,6 +7,7 @@ import 'package:tercen_dashboard/src/data.dart';
 import 'package:tercen_dashboard/src/session.dart';
 import 'package:tercen_dashboard/src/usage.dart';
 import 'package:tercen_dashboard/src/user_activity.dart';
+import 'package:tercen_dashboard/src/user_filters.dart';
 
 /// A signed-in admin, without a server: enough for the role gate and the
 /// rail's avatar. Every name here is invented.
@@ -25,9 +26,15 @@ DashboardSession fakeSession(String username, List<String> roles) =>
 
 /// Every panel's data, invented. Dates carry no zone suffix so they render
 /// the same whatever the machine's time zone; the usage report states its
-/// own window, so the screen does not depend on today's date either.
+/// own window, so the screen does not depend on today's date either, and
+/// the clock is fixed at 22 September 2026, 12:00 UTC. The Users page's
+/// filters are kept in [settings], in memory.
 class FakeDashboardData extends DashboardData {
-  FakeDashboardData() : super(fakeAdminSession());
+  FakeDashboardData({Settings? settings})
+      : super(fakeAdminSession(), settings: settings ?? MemorySettings());
+
+  @override
+  DateTime now() => DateTime.utc(2026, 9, 22, 12);
 
   static sci.Version _version(String tag, String date) => sci.Version()
     ..tag = tag
@@ -575,4 +582,42 @@ class ActivityLoadingData extends FakeDashboardData {
   Future<UserActivityReport?> userActivity(
           {ActivityWindow window = const ActivityWindow.allTime()}) =>
       Completer<UserActivityReport?>().future;
+}
+
+/// [FakeDashboardData] with the Users page's filters already set to
+/// [filters], and admin's email on `tercen.example`, so that excluding
+/// that domain leaves the other users.
+class FilteredUsersData extends FakeDashboardData {
+  FilteredUsersData(UserFilters filters)
+      : super(settings: MemorySettings()) {
+    filters.save(settings);
+  }
+
+  @override
+  Future<UserListing> users({int limit = UserRows.serverMaxLimit}) async {
+    final listing = await super.users(limit: limit);
+    return UserListing(
+      viaFallback: false,
+      limit: limit,
+      total: listing.total,
+      truncated: listing.truncated,
+      users: [
+        for (final u in listing.users)
+          u.name == 'admin'
+              ? DashboardUser(
+                  id: u.id,
+                  name: u.name,
+                  email: 'admin@tercen.example',
+                  domain: u.domain,
+                  roles: u.roles,
+                  isValidated: u.isValidated,
+                  createdDate: u.createdDate,
+                  tags: u.tags,
+                  projectsOwned: u.projectsOwned,
+                  projectsOwnedReported: u.projectsOwnedReported,
+                )
+              : u,
+      ],
+    );
+  }
 }

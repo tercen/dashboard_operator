@@ -12,6 +12,7 @@ import 'package:tercen_dashboard/src/screens/users_screen.dart';
 import 'package:tercen_dashboard/src/screens/tasks_screen.dart';
 import 'package:tercen_dashboard/src/theme.dart';
 import 'package:tercen_dashboard/src/user_activity.dart';
+import 'package:tercen_dashboard/src/user_filters.dart';
 
 import 'support/fake_data.dart';
 
@@ -103,13 +104,22 @@ class _ReportClient implements http_api.HttpClient {
 }
 
 /// The real [DashboardData.users] and [DashboardData.changeRole], over a
-/// server that answers [report].
+/// server that answers [report], with the filters kept in [settings] and
+/// the clock at [clock]: 15 October 2026, 12:00 UTC, unless a test says.
 class _ReportData extends DashboardData {
   final _ReportClient client;
-  _ReportData(Map<String, Object?> report)
+  DateTime clock;
+  _ReportData(Map<String, Object?> report,
+      {MemorySettings? settings, DateTime? clock})
       : client = _ReportClient(report),
-        super(fakeAdminSession()
-          ..serviceBase = Uri.parse('https://tercen.example'));
+        clock = clock ?? DateTime.utc(2026, 10, 15, 12),
+        super(
+            fakeAdminSession()
+              ..serviceBase = Uri.parse('https://tercen.example'),
+            settings: settings ?? MemorySettings());
+
+  @override
+  DateTime now() => clock;
 
   @override
   AdminApi get adminApi => AdminApi(Uri.parse('https://tercen.example'), client);
@@ -141,9 +151,12 @@ Future<_ReportData> _pump(
   int activityStatus = 200,
   Future<void>? gate,
   bool hold = false,
-  ActivityWindow window = const ActivityWindow.allTime(),
+  UserFilters filters = const UserFilters(),
+  MemorySettings? settings,
+  DateTime? clock,
 }) async {
-  final data = _ReportData(report);
+  final data = _ReportData(report, settings: settings, clock: clock);
+  if (settings == null) filters.save(data.settings);
   data.client
     ..activity = activity
     ..activityStatus = activityStatus
@@ -153,7 +166,7 @@ Future<_ReportData> _pump(
     ..physicalSize = const Size(1280, 1600)
     ..devicePixelRatio = 1;
   addTearDown(tester.view.reset);
-  await tester.pumpWidget(_app(data, window));
+  await tester.pumpWidget(_app(data));
   if (gate == null && !hold) {
     await tester.pumpAndSettle();
   } else {
@@ -169,10 +182,34 @@ Future<void> _pumpFrames(WidgetTester tester) async {
   }
 }
 
-Widget _app(DashboardData data, ActivityWindow window) => MaterialApp(
+Widget _app(DashboardData data) => MaterialApp(
       theme: DashboardTheme.light,
-      home: Scaffold(body: UsersScreen(data: data, activityWindow: window)),
+      home: Scaffold(body: UsersScreen(data: data)),
     );
+
+/// Sets the activity window with the filter bar's date picker, typing the
+/// days as an admin would. [from] and [to] are YYYY-MM-DD; the picker
+/// takes them as MM/DD/YYYY in the test's locale. Pumps, and settles
+/// unless the activity is held.
+Future<void> _chooseWindow(WidgetTester tester, String from, String to,
+    {bool settle = true}) async {
+  String typed(String day) {
+    final [y, m, d] = day.split('-');
+    return '$m/$d/$y';
+  }
+
+  Future<void> pump() => settle ? tester.pumpAndSettle() : _pumpFrames(tester);
+  await tester.tap(find.byKey(const Key('filter-window')));
+  await pump();
+  await tester.tap(find.byTooltip('Switch to input'));
+  await pump();
+  final fields = find.descendant(
+      of: find.byType(Dialog), matching: find.byType(TextField));
+  await tester.enterText(fields.at(0), typed(from));
+  await tester.enterText(fields.at(1), typed(to));
+  await tester.tap(find.text('OK'));
+  await pump();
+}
 
 /// The panel refreshes on a timer; unmount so it does not outlive the test.
 Future<void> _unmount(WidgetTester tester) =>
@@ -456,7 +493,7 @@ void main() {
       await _nextPage(tester);
       await tester.pumpAndSettle();
 
-      await tester.enterText(find.byType(TextField), 'user-11');
+      await tester.enterText(find.byKey(const Key('users-search')), 'user-11');
       await tester.pumpAndSettle();
 
       // user-110…119.
@@ -689,7 +726,7 @@ void main() {
 
       // The table is usable meanwhile: the filter narrows it, the role
       // menu opens.
-      await tester.enterText(find.byType(TextField), 'user-b');
+      await tester.enterText(find.byKey(const Key('users-search')), 'user-b');
       await tester.pump();
       expect(_banner(tester), 'Showing 1 of 3 users');
       expect(find.text('user-a'), findsNothing);
@@ -699,7 +736,7 @@ void main() {
       expect(find.byType(PopupMenuItem<String>), findsNWidgets(3));
       await tester.tapAt(const Offset(4, 4));
       await tester.pump(const Duration(milliseconds: 400));
-      await tester.enterText(find.byType(TextField), '');
+      await tester.enterText(find.byKey(const Key('users-search')), '');
       await tester.pump();
 
       gate.complete();
@@ -862,14 +899,15 @@ void main() {
       b['activeDaysInWindow'] = 2;
       final data = await _pump(tester, _w3Report(),
           activity: activity,
-          window: const ActivityWindow('2026-08-01', '2026-08-31'));
+          filters: const UserFilters(
+              mode: WindowMode.custom, from: '2026-08-01', to: '2026-08-31'));
 
       // The window goes to the server, and the column shows.
       expect(data.client.activityParams, [
         {'from': '2026-08-01', 'to': '2026-08-31', 'budget': 0},
       ]);
       expect(find.text('DAYS IN\nWINDOW'), findsOneWidget);
-      expect(find.byTooltip('Days with activity, 2026-08-01 – 2026-08-31'),
+      expect(find.byTooltip('Days with activity, 2026-08-01 – 2026-08-31 (UTC)'),
           findsOneWidget);
       // Truncated: "≥", with the reason on hover.
       expect(_rowTexts(tester, 'user-a').sublist(5, 8), ['+9', '≥40', '≥7']);
@@ -883,9 +921,7 @@ void main() {
     testWidgets('a new window reloads the activity', (tester) async {
       final data = await _pump(tester, _w3Report(), activity: _activity());
       data.client.activity = _activity(window: ('2026-09-01', '2026-09-30'));
-      await tester.pumpWidget(
-          _app(data, const ActivityWindow('2026-09-01', '2026-09-30')));
-      await tester.pumpAndSettle();
+      await _chooseWindow(tester, '2026-09-01', '2026-09-30');
 
       expect(data.client.activityParams, [
         {'from': '', 'to': '', 'budget': 0},
@@ -908,9 +944,7 @@ void main() {
     /// window (request 1, held); request 1 answers first.
     Future<_ReportData> supersede(WidgetTester tester) async {
       final data = await _pump(tester, _w3Report(), hold: true);
-      await tester.pumpWidget(
-          _app(data, const ActivityWindow('2026-09-01', '2026-09-30')));
-      await _pumpFrames(tester);
+      await _chooseWindow(tester, '2026-09-01', '2026-09-30', settle: false);
       expect(data.client.held, hasLength(2));
       data.client
           .answerHeld(1, _activity(window: ('2026-09-01', '2026-09-30')));
@@ -1078,6 +1112,478 @@ void main() {
       expect(
           UserListing(users: users, viaFallback: true, limit: 3).mayHaveMore,
           isFalse);
+    });
+  });
+
+  group('filter bar (activity window, MAU, email-domain exclusion)', () {
+    /// Invented users for the filters, with the windowed count each has in
+    /// the answer. The email domain is what an exclusion matches, not the
+    /// Domain column: `col` sits in a Domain named `example.test`.
+    const people = [
+      // name, email, Domain column, days in window, windowTruncated
+      ('act-1', 'act-1@lab.example', '', 3, false),
+      ('act-2', 'act-2@Example.TEST', '', 5, false),
+      ('idle', 'idle@lab.example', 'north', 0, false),
+      ('unread', 'unread@lab.example', 'north', null, null),
+      ('lower', 'lower@lab.example', '', 2, true),
+      ('lower-0', 'lower-0@lab.example', '', 0, true),
+      ('sub', 'sub@sub.example.test', 'north', 4, false),
+      ('col', 'col@lab.example', 'example.test', 1, false),
+      ('act-3', 'act-3@example.test', 'north', 9, false),
+    ];
+
+    Map<String, Object?> report() => {
+          'rows': [
+            for (final (name, email, domain, _, _) in people)
+              {
+                'id': 'id-$name',
+                'name': name,
+                'email': email,
+                'domain': domain,
+                'roles': ['user'],
+                'isValidated': true,
+                'createdDate': '2026-09-01T12:00:00',
+              }
+          ],
+          'total': people.length,
+          'truncated': false,
+        };
+
+    /// listUserActivity's answer: the counts in [people], over [window].
+    Map<String, Object?> activity((String, String) window) => {
+          'budget': 20000,
+          'window': {'from': window.$1, 'to': window.$2},
+          'rows': [
+            for (final (name, _, domain, days, cut) in people)
+              {
+                'id': 'id-$name',
+                'name': name,
+                'domain': domain,
+                'activeDays': days == null ? null : days + 10,
+                'activeDaysInWindow': days,
+                'recent': <Object>[],
+                'truncated': false,
+                'windowTruncated': cut,
+              }
+          ],
+        };
+
+    /// The names on the page, in [people]'s order (the list's order).
+    List<String> names(WidgetTester tester) => [
+          for (final (name, _, _, _, _) in people)
+            if (find.text(name).evaluate().isNotEmpty) name,
+        ];
+
+    String note(WidgetTester tester) =>
+        tester.widget<Text>(find.byKey(const Key('mau-note'))).data!;
+
+    ChoiceChip chip(WidgetTester tester, String key) =>
+        tester.widget<ChoiceChip>(find.byKey(Key(key)));
+
+    Future<void> exclude(WidgetTester tester, String typed) async {
+      await tester.enterText(find.byKey(const Key('filter-exclude')), typed);
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+    }
+
+    const mauWindow = ('2026-09-16', '2026-10-15');
+
+    group('UserFilters', () {
+      test('MAU is the last 30 UTC days, today included', () {
+        const mau = UserFilters(mode: WindowMode.mau);
+        expect(mau.window(DateTime.utc(2026, 10, 15, 23, 59)),
+            const ActivityWindow('2026-09-16', '2026-10-15'));
+        expect(mau.window(DateTime.utc(2026, 10, 15)),
+            const ActivityWindow('2026-09-16', '2026-10-15'));
+        // Across a month end and February.
+        expect(mau.window(DateTime.utc(2026, 3, 1, 0, 30)),
+            const ActivityWindow('2026-01-31', '2026-03-01'));
+        // A local clock counts on its UTC day.
+        // 23:30 and 00:30 UTC: one of them is on another local day in
+        // every zone but UTC.
+        expect(mau.window(DateTime.utc(2026, 10, 15, 23, 30).toLocal()).to,
+            '2026-10-15');
+        expect(mau.window(DateTime.utc(2026, 10, 15, 0, 30).toLocal()).to,
+            '2026-10-15');
+      });
+
+      test('all time and a custom window', () {
+        expect(const UserFilters().window(DateTime.utc(2026)).isAllTime,
+            isTrue);
+        expect(
+            const UserFilters(
+                    mode: WindowMode.custom, from: '2026-01-02', to: '2026-02-03')
+                .window(DateTime.utc(2026, 10, 15)),
+            const ActivityWindow('2026-01-02', '2026-02-03'));
+      });
+
+      test('the email domain decides, case-insensitive and exact', () {
+        const f = UserFilters(excluded: ['example.test']);
+        DashboardUser u(String email, {String domain = ''}) => DashboardUser(
+            id: 'i',
+            name: 'n',
+            email: email,
+            domain: domain,
+            roles: const [],
+            isValidated: true,
+            createdDate: '');
+        expect(f.excludes(u('a@example.test')), isTrue);
+        expect(f.excludes(u('a@EXAMPLE.Test')), isTrue);
+        expect(f.excludes(u('a@sub.example.test')), isFalse);
+        expect(f.excludes(u('a@lab.example', domain: 'example.test')), isFalse);
+        expect(f.excludes(u('no-at-sign')), isFalse);
+        // After the last "@", and trimmed on the email's side too.
+        expect(f.excludes(u('a@b@example.test')), isTrue);
+        expect(f.excludes(u('a@example.test ')), isTrue);
+        expect(normalizeDomain('  @Example.TEST '), 'example.test');
+      });
+
+      test('round-trips; what it cannot read falls back to the default', () {
+        final settings = MemorySettings();
+        const f = UserFilters(
+            mode: WindowMode.custom,
+            from: '2026-08-01',
+            to: '2026-08-31',
+            excluded: ['example.test']);
+        f.save(settings);
+        final back = UserFilters.load(settings);
+        expect((back.mode, back.from, back.to),
+            (WindowMode.custom, '2026-08-01', '2026-08-31'));
+        expect(back.excluded, ['example.test']);
+
+        for (final stored in [
+          '',
+          'not json',
+          '[1, 2]',
+          '{"mode": "someday"}',
+          '{"mode": "custom", "from": "2026-08-31", "to": "2026-08-01"}',
+          '{"mode": "custom", "from": "yesterday", "to": "2026-08-01"}',
+        ]) {
+          final f = UserFilters.load(
+              MemorySettings({UserFilters.storageKey: stored}));
+          expect(f.mode, WindowMode.allTime, reason: stored);
+          expect(f.excluded, isEmpty, reason: stored);
+        }
+        final mixed = UserFilters.load(MemorySettings({
+          UserFilters.storageKey:
+              '{"mode": "mau", "excluded": ["@A.example", 3, null, "", "a.example"]}'
+        }));
+        expect(mixed.mode, WindowMode.mau);
+        expect(mixed.excluded, ['a.example']);
+      });
+
+      test('in the window: active, inactive, or unknown — never guessed', () {
+        UserActivity a(int? days, {bool cut = false}) => UserActivity(
+            id: 'i',
+            name: 'n',
+            domain: '',
+            activeDaysInWindow: days,
+            windowTruncated: cut);
+        expect(windowActivity(a(3)), WindowActivity.active);
+        expect(windowActivity(a(2, cut: true)), WindowActivity.active);
+        expect(windowActivity(a(0)), WindowActivity.inactive);
+        expect(windowActivity(a(0, cut: true)), WindowActivity.unknown);
+        expect(windowActivity(a(null)), WindowActivity.unknown);
+        expect(windowActivity(null), WindowActivity.unknown);
+      });
+
+      test('the banner leaves the excluded out of every count', () {
+        List<DashboardUser> users(int n) => [
+              for (var i = 0; i < n; i++)
+                DashboardUser(
+                    id: '$i',
+                    name: '$i',
+                    email: '',
+                    domain: '',
+                    roles: const [],
+                    isValidated: true,
+                    createdDate: ''),
+            ];
+        expect(
+            showingBanner(
+                UserListing(
+                    users: users(10), viaFallback: false, total: 10,
+                    truncated: false),
+                7,
+                excluded: 2),
+            'Showing 7 of 8 users (2 excluded by email domain)');
+        // Part of the list: the unreturned users' domains are unknown.
+        expect(
+            showingBanner(
+                UserListing(
+                    users: users(10), viaFallback: false, total: 40,
+                    truncated: true),
+                7,
+                excluded: 2),
+            'Showing 7 of the first 8 users (2 excluded by email domain) — '
+            'the server returned only the first 10 of 40');
+        expect(
+            showingBanner(
+                UserListing(users: users(10), viaFallback: true, limit: 50),
+                7,
+                excluded: 2),
+            'Showing 7 of 8 users loaded (2 excluded by email domain); this '
+            'server does not report a total');
+      });
+    });
+
+    testWidgets(
+        'MAU: exactly the non-excluded users active in the last 30 days',
+        (tester) async {
+      final data = await _pump(tester, report(),
+          activity: activity(mauWindow),
+          filters: const UserFilters(excluded: ['example.test']));
+      expect(data.client.activityParams.single,
+          {'from': '', 'to': '', 'budget': 0});
+
+      await tester.tap(find.byKey(const Key('filter-mau')));
+      await tester.pumpAndSettle();
+
+      // Asked for today and the 29 days before it, UTC (the clock is
+      // 15 October 2026, 12:00 UTC).
+      expect(data.client.activityParams.last,
+          {'from': '2026-09-16', 'to': '2026-10-15', 'budget': 0});
+      expect(chip(tester, 'filter-mau').selected, isTrue);
+      // Active and kept: at least one day in the window, a lower bound of
+      // 2 included; `sub` and `col` are not @example.test. Left out:
+      // act-2 and act-3 (@example.test), idle (0 days), and unread and
+      // lower-0, whose activity could not be counted.
+      expect(names(tester), ['act-1', 'lower', 'sub', 'col']);
+      expect(_banner(tester),
+          'Showing 4 of 7 users (2 excluded by email domain)');
+      expect(
+          note(tester),
+          'MAU, 2026-09-16 – 2026-10-15 (UTC): users active in the window — '
+          '4 to 6: 2 more users whose activity in the window could not be '
+          'counted are not shown');
+      // The windowed column shows, the lower bound marked.
+      expect(find.text('DAYS IN\nWINDOW'), findsOneWidget);
+      expect(find.text('≥2'), findsOneWidget);
+
+      // Back to all time: every non-excluded user, no MAU line.
+      await tester.tap(find.byKey(const Key('filter-all-time')));
+      await tester.pumpAndSettle();
+      expect(data.client.activityParams.last,
+          {'from': '', 'to': '', 'budget': 0});
+      expect(names(tester),
+          ['act-1', 'idle', 'unread', 'lower', 'lower-0', 'sub', 'col']);
+      expect(find.byKey(const Key('mau-note')), findsNothing);
+      expect(find.text('DAYS IN\nWINDOW'), findsNothing);
+      await _unmount(tester);
+    });
+
+    testWidgets('MAU while the activity loads: the list is not narrowed yet',
+        (tester) async {
+      final data = await _pump(tester, report(),
+          hold: true, filters: const UserFilters(mode: WindowMode.mau));
+      expect(data.client.activityParams.single,
+          {'from': '2026-09-16', 'to': '2026-10-15', 'budget': 0});
+      expect(names(tester), hasLength(people.length));
+      expect(note(tester), startsWith('MAU, 2026-09-16 – 2026-10-15 (UTC): '
+          'waiting for the activity'));
+
+      data.client.answerHeld(0, activity(mauWindow));
+      await tester.pumpAndSettle();
+      expect(names(tester), ['act-1', 'act-2', 'lower', 'sub', 'col', 'act-3']);
+      expect(_banner(tester), 'Showing 6 of 9 users');
+      await _unmount(tester);
+    });
+
+    testWidgets('MAU pressed while a request is out: the old answer is dropped',
+        (tester) async {
+      final data = await _pump(tester, report(), hold: true);
+      await tester.tap(find.byKey(const Key('filter-mau')));
+      await _pumpFrames(tester);
+      expect(data.client.held, hasLength(2));
+
+      data.client.answerHeld(1, activity(mauWindow));
+      await tester.pumpAndSettle();
+      expect(names(tester), ['act-1', 'act-2', 'lower', 'sub', 'col', 'act-3']);
+
+      // The all-time answer, late: everyone "active" in it. Dropped.
+      final stale = activity(mauWindow);
+      for (final r in (stale['rows'] as List).cast<Map<String, Object?>>()) {
+        r['activeDaysInWindow'] = 99;
+        r['windowTruncated'] = false;
+      }
+      data.client.answerHeld(0, stale);
+      await tester.pumpAndSettle();
+      expect(names(tester), ['act-1', 'act-2', 'lower', 'sub', 'col', 'act-3']);
+      expect(find.text('99'), findsNothing);
+      await _unmount(tester);
+    });
+
+    group('the UTC day rolls over after a MAU load', () {
+      /// MAU loaded on 15 October 2026 at 12:00 UTC; the clock then moves
+      /// to 00:30 UTC on the 16th, whose MAU is 17 September – 16 October.
+      Future<_ReportData> rollOver(WidgetTester tester) async {
+        final data = await _pump(tester, report(),
+            activity: activity(mauWindow),
+            filters: const UserFilters(mode: WindowMode.mau));
+        expect(data.client.activityParams.single,
+            {'from': '2026-09-16', 'to': '2026-10-15', 'budget': 0});
+        data
+          ..clock = DateTime.utc(2026, 10, 16, 0, 30)
+          ..client.activity = activity(('2026-09-17', '2026-10-16'));
+        return data;
+      }
+
+      testWidgets('a chosen window equal to the new MAU is fetched',
+          (tester) async {
+        final data = await rollOver(tester);
+        await _chooseWindow(tester, '2026-09-17', '2026-10-16');
+
+        expect(data.client.activityParams, [
+          {'from': '2026-09-16', 'to': '2026-10-15', 'budget': 0},
+          {'from': '2026-09-17', 'to': '2026-10-16', 'budget': 0},
+        ]);
+        expect(
+            find.byTooltip('Days with activity, 2026-09-17 – 2026-10-16 (UTC)'),
+            findsOneWidget);
+        await _unmount(tester);
+      });
+
+      testWidgets('pressing MAU again fetches the new day\'s MAU',
+          (tester) async {
+        final data = await rollOver(tester);
+        await tester.tap(find.byKey(const Key('filter-mau')));
+        await tester.pumpAndSettle();
+
+        expect(data.client.activityParams, [
+          {'from': '2026-09-16', 'to': '2026-10-15', 'budget': 0},
+          {'from': '2026-09-17', 'to': '2026-10-16', 'budget': 0},
+        ]);
+        expect(note(tester), startsWith('MAU, 2026-09-17 – 2026-10-16 (UTC)'));
+        await _unmount(tester);
+      });
+    });
+
+    testWidgets('excluding example.test removes its rows from list and count',
+        (tester) async {
+      final data =
+          await _pump(tester, report(), activity: activity(mauWindow));
+      expect(_banner(tester), 'Showing 9 of 9 users');
+
+      await exclude(tester, ' @Example.Test ');
+
+      expect(find.byKey(const Key('excluded-example.test')), findsOneWidget);
+      expect(names(tester),
+          ['act-1', 'idle', 'unread', 'lower', 'lower-0', 'sub', 'col']);
+      expect(_banner(tester),
+          'Showing 7 of 7 users (2 excluded by email domain)');
+      // The name search counts within what is left.
+      await tester.enterText(find.byKey(const Key('users-search')), 'act');
+      await tester.pumpAndSettle();
+      expect(names(tester), ['act-1']);
+      expect(_banner(tester),
+          'Showing 1 of 7 users (2 excluded by email domain)');
+      await tester.enterText(find.byKey(const Key('users-search')), '');
+      await tester.pumpAndSettle();
+
+      // An exclusion is no new window: nothing is fetched again.
+      expect(data.client.activityParams, hasLength(1));
+
+      // A second domain; the same one again is not added twice.
+      await exclude(tester, 'lab.example');
+      await exclude(tester, 'LAB.example');
+      expect(names(tester), ['sub']);
+      expect(_banner(tester),
+          'Showing 1 of 1 users (8 excluded by email domain)');
+      expect(find.byKey(const Key('excluded-lab.example')), findsOneWidget);
+
+      // Removing the chips brings the rows back.
+      await tester.tap(find.byTooltip('Include @lab.example again'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Include @example.test again'));
+      await tester.pumpAndSettle();
+      expect(_banner(tester), 'Showing 9 of 9 users');
+      await _unmount(tester);
+    });
+
+    testWidgets('the settings persist and are restored on the next load',
+        (tester) async {
+      final settings = MemorySettings();
+      await _pump(tester, report(),
+          activity: activity(mauWindow), settings: settings);
+      await tester.tap(find.byKey(const Key('filter-mau')));
+      await tester.pumpAndSettle();
+      await exclude(tester, 'example.test');
+      expect(json.decode(settings.values[UserFilters.storageKey]!), {
+        'mode': 'mau',
+        'excluded': ['example.test'],
+      });
+      await _unmount(tester);
+
+      // A new page on a later day: the MAU is counted to that day.
+      final data = await _pump(tester, report(),
+          activity: activity(('2026-09-22', '2026-10-21')),
+          settings: settings,
+          clock: DateTime.utc(2026, 10, 21, 8));
+      expect(data.client.activityParams.single,
+          {'from': '2026-09-22', 'to': '2026-10-21', 'budget': 0});
+      expect(chip(tester, 'filter-mau').selected, isTrue);
+      expect(find.byKey(const Key('excluded-example.test')), findsOneWidget);
+      expect(names(tester), ['act-1', 'lower', 'sub', 'col']);
+      await _unmount(tester);
+
+      // A chosen window is kept as its days.
+      final custom = await _pump(tester, report(),
+          activity: activity(('2026-08-01', '2026-08-31')),
+          settings: settings);
+      await _chooseWindow(tester, '2026-08-01', '2026-08-31');
+      expect(custom.client.activityParams.last,
+          {'from': '2026-08-01', 'to': '2026-08-31', 'budget': 0});
+      expect(tester.widget<Text>(find.descendant(
+              of: find.byKey(const Key('filter-window')),
+              matching: find.byType(Text))).data,
+          '2026-08-01 – 2026-08-31');
+      await _unmount(tester);
+      final again = await _pump(tester, report(),
+          activity: activity(('2026-08-01', '2026-08-31')),
+          settings: settings);
+      expect(again.client.activityParams.single,
+          {'from': '2026-08-01', 'to': '2026-08-31', 'budget': 0});
+      expect(chip(tester, 'filter-window').selected, isTrue);
+      // Custom is not MAU: every non-excluded user, with their window days.
+      expect(names(tester),
+          ['act-1', 'idle', 'unread', 'lower', 'lower-0', 'sub', 'col']);
+      await _unmount(tester);
+    });
+
+    testWidgets('an old server: MAU and the window are off, exclusion works',
+        (tester) async {
+      // Kept from a newer server: MAU and an exclusion.
+      await _pump(tester, report(),
+          filters: const UserFilters(
+              mode: WindowMode.mau, excluded: ['example.test']));
+
+      expect(chip(tester, 'filter-mau').onSelected, isNull);
+      expect(chip(tester, 'filter-window').onSelected, isNull);
+      expect(find.byTooltip('This server does not report user activity'),
+          findsNWidgets(3));
+      expect(note(tester),
+          'MAU unavailable: this server does not report user activity');
+      // No count to narrow by: every non-excluded user, no window column.
+      expect(names(tester),
+          ['act-1', 'idle', 'unread', 'lower', 'lower-0', 'sub', 'col']);
+      expect(_banner(tester),
+          'Showing 7 of 7 users (2 excluded by email domain)');
+      expect(find.text('DAYS IN\nWINDOW'), findsNothing);
+      await _unmount(tester);
+    });
+
+    testWidgets('MAU when the activity fails: unavailable, not narrowed',
+        (tester) async {
+      await _pump(tester, report(),
+          activity: activity(mauWindow),
+          activityStatus: 500,
+          filters: const UserFilters(mode: WindowMode.mau));
+      expect(note(tester),
+          'MAU unavailable: the activity could not be loaded, so the list is '
+          'not narrowed to active users');
+      expect(names(tester), hasLength(people.length));
+      expect(find.text('Retry'), findsOneWidget);
+      await _unmount(tester);
     });
   });
 }
