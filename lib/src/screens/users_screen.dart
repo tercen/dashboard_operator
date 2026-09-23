@@ -639,11 +639,14 @@ class _UsersScreenState extends State<UsersScreen> {
       DataCell(Row(spacing: 4, children: [
         for (final role in user.roles)
           if (role != 'user') StateChip(role),
-        _RoleMenu(
-          roles: user.roles,
-          onChange: (role, grant) =>
-              _changeRole(context, user, role, grant, refresh),
-        ),
+        // Role controls act on the admin's own domain, so they are shown
+        // only on its rows.
+        if (_canEditTags(user))
+          _RoleMenu(
+            roles: user.roles,
+            onChange: (role, grant) =>
+                _changeRole(context, user, role, grant, refresh),
+          ),
       ])),
       DataCell(Icon(
         user.isValidated ? Icons.check_circle_outline : Icons.hourglass_empty,

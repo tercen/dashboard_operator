@@ -154,8 +154,10 @@ Future<_ReportData> _pump(
   UserFilters filters = const UserFilters(),
   MemorySettings? settings,
   DateTime? clock,
+  String domain = '',
 }) async {
   final data = _ReportData(report, settings: settings, clock: clock);
+  data.session.domain = domain;
   if (settings == null) filters.save(data.settings);
   data.client
     ..activity = activity
@@ -235,6 +237,30 @@ List<String> _rowTexts(WidgetTester tester, String name) {
       tester.getCenter(a).dx.compareTo(tester.getCenter(b).dx));
   return [for (final t in onRow) tester.widget<Text>(t).data!];
 }
+
+/// Whether [finder] has a match level with the row whose Domain cell reads
+/// [domain].
+bool _onDomainRow(WidgetTester tester, Finder finder, String domain) {
+  final y = tester.getCenter(find.text(domain)).dy;
+  return [
+    for (var i = 0; i < finder.evaluate().length; i++) finder.at(i)
+  ].any((f) => (tester.getCenter(f).dy - y).abs() < 4);
+}
+
+/// A user in the default domain and one in `north`, each with a role of
+/// its own. Invented.
+List<Map<String, Object?>> _twoDomainRows() => [
+      for (final (domain, role) in [('', 'manager'), ('north', 'operator')])
+        {
+          'id': 'id-a',
+          'name': 'user-a',
+          'email': 'a@example.test',
+          'domain': domain,
+          'roles': ['user', role],
+          'isValidated': true,
+          'createdDate': '2026-09-01T12:00:00',
+        }
+    ];
 
 /// Rows as a server with tercen/sci#1664 sends them: `tags` and
 /// `projectsOwned` on every row, a null count where the server could not
@@ -363,11 +389,12 @@ void main() {
         expect(find.text(column), findsOneWidget);
       }
 
-      // First page: 50 rows, each with its role control.
+      // First page: 50 rows; the 25 of the admin's own domain have the
+      // role control.
       expect(find.text('user-001'), findsOneWidget);
       expect(find.text('user-050'), findsOneWidget);
       expect(find.text('user-051'), findsNothing);
-      expect(find.byTooltip('Change roles'), findsNWidgets(50));
+      expect(find.byTooltip('Change roles'), findsNWidgets(25));
       expect(find.text('admin'), findsOneWidget);
       expect(find.text('1–50 of 120'), findsOneWidget);
 
@@ -434,9 +461,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('101–150 of 150'), findsOneWidget);
 
-      /// The role menu on user-120's row: the one level with its name.
+      /// The role menu on user-119's row: the one level with its name.
       Finder roleMenu() {
-        final nameY = tester.getCenter(find.text('user-120')).dy;
+        final nameY = tester.getCenter(find.text('user-119')).dy;
         final menus = find.byTooltip('Change roles');
         final index = List.generate(menus.evaluate().length, (i) => i)
             .firstWhere(
@@ -455,11 +482,11 @@ void main() {
         await tester.pumpAndSettle();
       }
 
-      /// After the refresh the page is kept and user-120's row is on it.
+      /// After the refresh the page is kept and user-119's row is on it.
       void expectPageKept() {
         expect(find.text('101–150 of 150'), findsOneWidget);
         expect(find.text('user-101'), findsOneWidget);
-        expect(find.text('user-120'), findsOneWidget);
+        expect(find.text('user-119'), findsOneWidget);
         expect(find.text('user-001'), findsNothing);
       }
 
@@ -467,20 +494,20 @@ void main() {
       data.client.calls.clear();
       await pick('operator');
 
-      expect(data.client.calls, ['grantRole user-120 operator', 'listUsers']);
+      expect(data.client.calls, ['grantRole user-119 operator', 'listUsers']);
       expectPageKept();
-      // The new chip sits in user-120's row.
+      // The new chip sits in user-119's row.
       expect(find.text('operator'), findsOneWidget);
       expect(
           (tester.getCenter(find.text('operator')).dy -
-                  tester.getCenter(find.text('user-120')).dy)
+                  tester.getCenter(find.text('user-119')).dy)
               .abs(),
           lessThan(4));
 
       data.client.calls.clear();
       await pick('operator');
 
-      expect(data.client.calls, ['revokeRole user-120 operator', 'listUsers']);
+      expect(data.client.calls, ['revokeRole user-119 operator', 'listUsers']);
       expectPageKept();
       expect(find.text('operator'), findsNothing);
       await _unmount(tester);
@@ -518,7 +545,7 @@ void main() {
       for (final column in ['ROLES', 'PROJECTS\nOWNED', 'TAGS']) {
         expect(find.text(column), findsOneWidget);
       }
-      expect(find.byTooltip('Change roles'), findsNWidgets(12));
+      expect(find.byTooltip('Change roles'), findsNWidgets(6));
       expect(_rowTexts(tester, 'user-012'), [
         'user-012',
         'user12@example.test',
@@ -590,8 +617,8 @@ void main() {
               'The server could not count the projects in this instance'),
           findsOneWidget);
 
-      // The role controls are still on every row.
-      expect(find.byTooltip('Change roles'), findsNWidgets(3));
+      // The role control is on the own-domain row.
+      expect(find.byTooltip('Change roles'), findsOneWidget);
       await _unmount(tester);
     });
 
@@ -701,11 +728,11 @@ void main() {
       final data = await _pump(tester, _w3Report(),
           activity: _activity(), gate: gate.future);
 
-      // listUsers is on screen, every row with its role control, while
+      // listUsers is on screen, with its role control, while
       // listUserActivity has not answered.
       expect(_banner(tester), 'Showing 3 of 3 users');
       expect(find.text('user-a'), findsOneWidget);
-      expect(find.byTooltip('Change roles'), findsNWidgets(3));
+      expect(find.byTooltip('Change roles'), findsOneWidget);
       expect(find.text('LAST\nWORKED ON'), findsOneWidget);
       expect(find.text('ACTIVE\nDAYS'), findsOneWidget);
       // Three rows, two activity cells each, all loading.
@@ -726,10 +753,10 @@ void main() {
 
       // The table is usable meanwhile: the filter narrows it, the role
       // menu opens.
-      await tester.enterText(find.byKey(const Key('users-search')), 'user-b');
+      await tester.enterText(find.byKey(const Key('users-search')), 'user-a');
       await tester.pump();
       expect(_banner(tester), 'Showing 1 of 3 users');
-      expect(find.text('user-a'), findsNothing);
+      expect(find.text('user-b'), findsNothing);
       await tester.tap(find.byTooltip('Change roles'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
@@ -1021,7 +1048,7 @@ void main() {
         'pilot',
         'beta',
       ]);
-      expect(find.byTooltip('Change roles'), findsNWidgets(3));
+      expect(find.byTooltip('Change roles'), findsOneWidget);
 
       data.client.activityStatus = 200;
       await tester.tap(find.text('Retry'));
@@ -1052,7 +1079,7 @@ void main() {
         'pilot',
         'beta',
       ]);
-      expect(find.byTooltip('Change roles'), findsNWidgets(3));
+      expect(find.byTooltip('Change roles'), findsOneWidget);
       await _unmount(tester);
     });
 
@@ -1076,6 +1103,41 @@ void main() {
       expect(
           ActivityObject.fromJson({'kind': 'Workflow', 'owner': ''}).owner,
           isNull);
+    });
+  });
+
+  // Role controls act on the admin's own domain, so they are shown only on
+  // its rows.
+  group('role controls on the own domain only', () {
+    testWidgets('two domains listed: the menu is on the own-domain row',
+        (tester) async {
+      await _pump(tester,
+          {'rows': _twoDomainRows(), 'total': 2, 'truncated': false});
+
+      expect(find.text('user-a'), findsNWidgets(2));
+      final menu = find.byTooltip('Change roles');
+      expect(menu, findsOneWidget);
+      expect(_onDomainRow(tester, menu, 'default'), isTrue);
+      expect(_onDomainRow(tester, menu, 'north'), isFalse);
+      // The other domain's roles are still shown, read-only.
+      expect(_onDomainRow(tester, find.text('operator'), 'north'), isTrue);
+      expect(_onDomainRow(tester, find.text('manager'), 'default'), isTrue);
+      await _unmount(tester);
+    });
+
+    testWidgets('an admin of north gets the menu on the north row only',
+        (tester) async {
+      await _pump(tester,
+          {'rows': _twoDomainRows(), 'total': 2, 'truncated': false},
+          domain: 'north');
+
+      final menu = find.byTooltip('Change roles');
+      expect(menu, findsOneWidget);
+      expect(_onDomainRow(tester, menu, 'north'), isTrue);
+      expect(_onDomainRow(tester, menu, 'default'), isFalse);
+      expect(_onDomainRow(tester, find.text('manager'), 'default'), isTrue);
+      expect(_onDomainRow(tester, find.text('operator'), 'north'), isTrue);
+      await _unmount(tester);
     });
   });
 
