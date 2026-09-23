@@ -313,10 +313,13 @@ void main() {
   // bundled fonts, the widest row the fixtures allow fits inside the card.
   // Nothing overflows, there is nothing to scroll to, and the "+N" chip
   // and the Edit tags button — the last things in the row — end inside
-  // the card and the screen.
+  // the card and the screen. The admin is signed in to the row's domain,
+  // so the row has its Edit tags button.
   testWidgets('Users, worst-case row fits at 1728 px', (tester) async {
-    await _pumpApp(tester, ThemeMode.light, fakeAdminSession(),
-        data: TaggedUsersData.worstCase(), size: const Size(1728, 800));
+    final session = fakeAdminSession()..domain = 'north';
+    await _pumpApp(tester, ThemeMode.light, session,
+        data: TaggedUsersData.worstCase(session: session),
+        size: const Size(1728, 800));
     await _openUsers(tester);
 
     expect(tester.takeException(), isNull);

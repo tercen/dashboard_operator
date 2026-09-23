@@ -601,6 +601,14 @@ class _UsersScreenState extends State<UsersScreen> {
     }
   }
 
+  /// Whether this admin may edit [user]'s tags from here: only on a row of
+  /// the admin's own domain. The user endpoints find a document by id in
+  /// the session's domain, and the default accounts have the same id in
+  /// every domain, so an edit from another domain's row would load and save
+  /// the admin's own domain's user of that id, not the one the row shows.
+  bool _canEditTags(DashboardUser user) =>
+      widget.data.session.isAdmin && user.domain == widget.data.session.domain;
+
   /// Opens the tag editor on [user]'s stored document; after a save,
   /// reloads the list.
   Future<void> _editTags(
@@ -652,7 +660,7 @@ class _UsersScreenState extends State<UsersScreen> {
       DataCell(_ProjectsOwned(user)),
       DataCell(Row(mainAxisSize: MainAxisSize.min, spacing: 4, children: [
         _Tags(user.tags ?? const []),
-        if (widget.data.session.isAdmin)
+        if (_canEditTags(user))
           IconButton(
             key: Key('edit-tags-${user.domain}-${user.id}'),
             tooltip: 'Edit tags',

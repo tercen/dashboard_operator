@@ -37,6 +37,7 @@ Map<String, Object?> _storedDoc({
   String id = 'user-a',
   String rev = '7-aaaa',
   List<Object?> tags = const ['pilot', 'beta'],
+  String domain = '',
 }) =>
     {
       'kind': 'User',
@@ -47,7 +48,7 @@ Map<String, Object?> _storedDoc({
       'email': '$id@example.test',
       'fieldUnknownToTheClient': 'keep me',
       'isValidated': true,
-      'domain': '',
+      'domain': domain,
       'roles': ['user'],
       'tags': tags,
       'futureSettings': {
@@ -67,16 +68,29 @@ Map<String, Object?> _storedDoc({
 /// one and answers the new rev, and refuses it with a 409 otherwise.
 /// [changeBeforeNextPost] has someone else change the user first, as happens
 /// between the read and the save; [refuseNextPost] refuses the next save
-/// with that status. listUsers lists the stored documents;
+/// with that status. listUsers lists the stored documents of every domain;
 /// listUserActivity is missing (404).
+///
+/// As on the server, GET and POST find a user by id in the session's
+/// [domain] only: [docs] are that domain's documents, [elsewhere] the other
+/// domains', which are listed but never reached by id.
 class _UserServer implements http_api.HttpClient {
+  final String domain;
   final Map<String, Map<String, Object?>> docs;
+  final List<Map<String, Object?>> elsewhere;
   final List<String> calls = [];
   final List<Object?> postedBodies = [];
   Map<String, Object?>? changeBeforeNextPost;
   int? refuseNextPost;
-  _UserServer(List<Map<String, Object?>> docs)
-      : docs = {for (final d in docs) '${d['id']}': d};
+  _UserServer(List<Map<String, Object?>> docs, {this.domain = ''})
+      : docs = {
+          for (final d in docs)
+            if (d['domain'] == domain) '${d['id']}': d,
+        },
+        elsewhere = [
+          for (final d in docs)
+            if (d['domain'] != domain) d,
+        ];
 
   @override
   Future<http_api.Response> get(url,
@@ -138,7 +152,7 @@ class _UserServer implements http_api.HttpClient {
       return _FakeResponse('', statusCode: 404);
     }
     final rows = [
-      for (final d in docs.values)
+      for (final d in [...docs.values, ...elsewhere])
         {
           'id': d['id'],
           'name': d['name'],
@@ -175,8 +189,9 @@ class _ServerData extends DashboardData {
 
 Future<_UserServer> _pump(WidgetTester tester, List<Map<String, Object?>> docs,
     {DashboardSession? session}) async {
-  final server = _UserServer(docs);
-  final data = _ServerData(server, session ?? fakeAdminSession());
+  session ??= fakeAdminSession();
+  final server = _UserServer(docs, domain: session.domain);
+  final data = _ServerData(server, session);
   tester.view
     ..physicalSize = const Size(1728, 1200)
     ..devicePixelRatio = 1;
@@ -189,8 +204,9 @@ Future<_UserServer> _pump(WidgetTester tester, List<Map<String, Object?>> docs,
   return server;
 }
 
-Future<void> _open(WidgetTester tester, String id) async {
-  await tester.tap(find.byKey(Key('edit-tags--$id')));
+Future<void> _open(WidgetTester tester, String id,
+    {String domain = ''}) async {
+  await tester.tap(find.byKey(Key('edit-tags-$domain-$id')));
   await tester.pumpAndSettle();
 }
 
@@ -462,9 +478,56 @@ void main() {
       await _unmount(tester);
     });
 
-    testWidgets('admins get the control on every row', (tester) async {
+    testWidgets('admins get the control on every row of their domain',
+        (tester) async {
       await _pump(tester, [_storedDoc(), _storedDoc(id: 'user-b')]);
       expect(find.byTooltip('Edit tags'), findsNWidgets(2));
+      await _unmount(tester);
+    });
+
+    // The default accounts have the same id in every domain, and the user
+    // endpoints find an id in the session's domain. An edit from another
+    // domain's row would land on the admin's own domain's user.
+    testWidgets('the same id in two domains: only the own-domain row edits',
+        (tester) async {
+      final own = _storedDoc(id: 'user-same', tags: ['ours']);
+      final other =
+          _storedDoc(id: 'user-same', domain: 'north', tags: ['theirs']);
+      final server = await _pump(tester, [own, other]);
+
+      // Both rows are listed; only the default domain's has the control.
+      expect(find.byTooltip('ours'), findsOneWidget);
+      expect(find.byTooltip('theirs'), findsOneWidget);
+      expect(find.byKey(const Key('edit-tags--user-same')), findsOneWidget);
+      expect(find.byKey(const Key('edit-tags-north-user-same')), findsNothing);
+      expect(find.byTooltip('Edit tags'), findsOneWidget);
+
+      // The own row edits the document it shows, and only that one.
+      await _open(tester, 'user-same');
+      expect(_chips(tester), ['ours']);
+      await _type(tester, 'gamma');
+      await _save(tester);
+      expect(_posted(server)['tags'], ['ours', 'gamma']);
+      expect(server.docs['user-same']!['tags'], ['ours', 'gamma']);
+      expect(server.elsewhere.single['tags'], ['theirs']);
+      await _unmount(tester);
+    });
+
+    testWidgets('an admin of another domain edits only that domain\'s rows',
+        (tester) async {
+      final server = await _pump(tester, [
+        _storedDoc(id: 'user-same', tags: ['default-tag']),
+        _storedDoc(id: 'user-same', domain: 'north', tags: ['north-tag']),
+      ], session: fakeAdminSession()..domain = 'north');
+
+      expect(find.byKey(const Key('edit-tags--user-same')), findsNothing);
+      expect(find.byTooltip('Edit tags'), findsOneWidget);
+      await _open(tester, 'user-same', domain: 'north');
+      expect(_chips(tester), ['north-tag']);
+      await _type(tester, 'gamma');
+      await _save(tester);
+      expect(server.docs['user-same']!['tags'], ['north-tag', 'gamma']);
+      expect(server.elsewhere.single['tags'], ['default-tag']);
       await _unmount(tester);
     });
 

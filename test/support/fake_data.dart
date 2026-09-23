@@ -31,8 +31,9 @@ DashboardSession fakeSession(String username, List<String> roles) =>
 /// the clock is fixed at 22 September 2026, 12:00 UTC. The Users page's
 /// filters are kept in [settings], in memory.
 class FakeDashboardData extends DashboardData {
-  FakeDashboardData({Settings? settings})
-      : super(fakeAdminSession(), settings: settings ?? MemorySettings());
+  FakeDashboardData({Settings? settings, DashboardSession? session})
+      : super(session ?? fakeAdminSession(),
+            settings: settings ?? MemorySettings());
 
   @override
   DateTime now() => DateTime.utc(2026, 9, 22, 12);
@@ -498,7 +499,8 @@ class ManyUsersData extends FakeDashboardData {
 /// [FakeDashboardData] with one more user, `tagged`, whose tags are [tags]:
 /// many tags, or one very long one, to show the Tags cell stays bounded.
 /// [name], [roles], [domain], [validated] and [owned] make the rest of that
-/// row as wide as the test needs.
+/// row as wide as the test needs. [session] is who is signed in: an admin
+/// of the default domain unless given.
 class TaggedUsersData extends FakeDashboardData {
   final List<String> tags;
   final String name;
@@ -513,14 +515,17 @@ class TaggedUsersData extends FakeDashboardData {
     this.domain = '',
     this.validated = true,
     this.owned = 2,
+    super.session,
   });
 
   /// The widest row the fixtures allow: a name and email longer than any
   /// other fixture's, every grantable role, not validated, a domain, a
   /// four-digit project count, and a thousand tags whose first ones fill a
   /// chip, so the "+N" chip is four characters wide too. A longer [name]
-  /// makes a row wider than that.
-  TaggedUsersData.worstCase({String name = 'worst-case'})
+  /// makes a row wider than that. An admin signed in to that domain (the
+  /// [session]) also gets the Edit tags button on it.
+  TaggedUsersData.worstCase(
+      {String name = 'worst-case', DashboardSession? session})
       : this(
           [
             for (var i = 1; i <= 3; i++) 'W' * 40,
@@ -531,6 +536,7 @@ class TaggedUsersData extends FakeDashboardData {
           domain: 'north',
           validated: false,
           owned: 1234,
+          session: session,
         );
 
   /// The widest activity the fixtures allow: a name longer than a cell,
