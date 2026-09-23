@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data.dart';
 import '../widgets.dart';
+import 'create_user_dialog.dart';
 
 /// The count line above the table. [shown] is the number of rows left after
 /// the filter. The total is the server's when it reports one; otherwise it
@@ -118,6 +119,22 @@ class _UsersScreenState extends State<UsersScreen> {
     }
   }
 
+  /// Opens the Create user dialog; after a create, reloads the list so the
+  /// new user is in it.
+  Future<void> _createUser(BuildContext context, VoidCallback refresh) async {
+    final created = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => CreateUserDialog(create: widget.data.createUser),
+    );
+    if (created == null) return;
+    refresh();
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Created $created'), width: 320));
+    }
+  }
+
   DataRow _userRow(
       BuildContext context, DashboardUser user, VoidCallback refresh) {
     return DataRow(cells: [
@@ -178,8 +195,20 @@ class _UsersScreenState extends State<UsersScreen> {
                 u.domain.toLowerCase().contains(_filter))
             .toList();
         final theme = Theme.of(context);
-        final banner = Text(showingBanner(listing, visible.length),
-            key: const Key('users-banner'), style: theme.textTheme.bodySmall);
+        // The count line, and for admins the Create user button beside it.
+        final banner = Row(children: [
+          Expanded(
+            child: Text(showingBanner(listing, visible.length),
+                key: const Key('users-banner'),
+                style: theme.textTheme.bodySmall),
+          ),
+          if (widget.data.session.isAdmin)
+            FilledButton.icon(
+              onPressed: () => _createUser(context, refresh),
+              icon: const Icon(Icons.person_add_alt_outlined, size: 18),
+              label: const Text('Create user'),
+            ),
+        ]);
         if (visible.isEmpty) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
