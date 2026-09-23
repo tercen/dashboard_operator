@@ -89,6 +89,49 @@ class _RoleMenu extends StatelessWidget {
   }
 }
 
+/// The Projects owned cell: blank when the server does not send the count,
+/// the count when it does, and "unknown" — muted and italic, so it never
+/// reads as a number — when the server sent null because it could not count.
+class _ProjectsOwned extends StatelessWidget {
+  final DashboardUser user;
+  const _ProjectsOwned(this.user);
+
+  @override
+  Widget build(BuildContext context) {
+    if (!user.projectsOwnedReported) return const SizedBox.shrink();
+    final count = user.projectsOwned;
+    if (count != null) return Text('$count');
+    return Tooltip(
+      message: 'The server could not count the projects in this instance',
+      child: Text('unknown',
+          key: const Key('projects-owned-unknown'),
+          style: TextStyle(
+            fontStyle: FontStyle.italic,
+            color: StateChip.colorsFor(context, Severity.neutral).$2,
+          )),
+    );
+  }
+}
+
+/// A read-only tag: outlined, so it does not read as a role chip.
+class _TagChip extends StatelessWidget {
+  final String tag;
+  const _TagChip(this.tag);
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = StateChip.colorsFor(context, Severity.neutral).$2;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+      decoration: BoxDecoration(
+        border: Border.all(color: fg.withValues(alpha: 0.6)),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(tag, style: TextStyle(color: fg, fontSize: 11.5)),
+    );
+  }
+}
+
 class _UsersScreenState extends State<UsersScreen> {
   final _filterField = TextEditingController();
   String _filter = '';
@@ -186,6 +229,17 @@ class _UsersScreenState extends State<UsersScreen> {
       )),
       DataCell(Text(user.domain.isEmpty ? 'default' : user.domain)),
       DataCell(Text(formatDate(user.createdDate))),
+      DataCell(Text(switch (user.instance) {
+        null => '',
+        '' => 'default',
+        final instance => instance,
+      })),
+      DataCell(_ProjectsOwned(user)),
+      // A Row, not a Wrap: the column sizes to its cells, and a Wrap
+      // measured that way stacks its chips.
+      DataCell(Row(mainAxisSize: MainAxisSize.min, spacing: 4, children: [
+        for (final tag in user.tags ?? const <String>[]) _TagChip(tag),
+      ])),
     ]);
   }
 
@@ -312,6 +366,9 @@ class _UsersScreenState extends State<UsersScreen> {
                         },
                   showEmptyRows: false,
                   showFirstLastButtons: true,
+                  // Nine columns: at the default spacing the last ones fall
+                  // off a laptop-width screen.
+                  columnSpacing: 28,
                   columns: const [
                     DataColumn(label: Text('NAME')),
                     DataColumn(label: Text('EMAIL')),
@@ -319,6 +376,10 @@ class _UsersScreenState extends State<UsersScreen> {
                     DataColumn(label: Text('VALIDATED')),
                     DataColumn(label: Text('DOMAIN')),
                     DataColumn(label: Text('CREATED')),
+                    DataColumn(label: Text('INSTANCE')),
+                    DataColumn(
+                        label: Text('PROJECTS OWNED'), numeric: true),
+                    DataColumn(label: Text('TAGS')),
                   ],
                   source: _UserRows(
                       visible, (user) => _userRow(context, user, refresh)),
