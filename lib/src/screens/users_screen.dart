@@ -6,6 +6,9 @@ import '../widgets.dart';
 /// The count line above the table. [shown] is the number of rows left after
 /// the filter. The total is the server's when it reports one; otherwise it
 /// is the number of users loaded, and the line says the total is unknown.
+/// It claims only what the response supports: a server that says the list is
+/// truncated but gives no total has not said why, so the line does not blame
+/// the limit.
 String showingBanner(UserListing listing, int shown) {
   final loaded = listing.users.length;
   final total = listing.total;
@@ -14,6 +17,10 @@ String showingBanner(UserListing listing, int shown) {
         ? 'Showing $shown of $total users — the server returned only the '
             'first $loaded'
         : 'Showing $shown of $total users';
+  }
+  if (listing.truncated == true) {
+    return 'Showing $shown of the first $loaded users — the server reported '
+        'the list as incomplete; it does not report a total';
   }
   return listing.mayHaveMore
       ? 'Showing $shown of the first $loaded users — the list stopped at the '

@@ -22,33 +22,55 @@ class _FakeResponse implements http_api.Response {
   _FakeResponse(this.body);
 }
 
-/// Answers every POST with one listUsers report.
+/// Answers listUsers with [report], and grantRole/revokeRole as a server
+/// would: the change is recorded in [report]'s rows, so the next listUsers
+/// shows it, and the call answers with the user's new roles.
 class _ReportClient implements http_api.HttpClient {
   final Map<String, Object?> report;
+  final List<String> calls = [];
   _ReportClient(this.report);
 
   @override
   Future<http_api.Response> post(url,
-          {Map<String, String>? headers,
-          body,
-          String? responseType,
-          encoding,
-          progressCallback}) async =>
-      _FakeResponse(ContentCodec.tson().encode(json.encode(report)));
+      {Map<String, String>? headers,
+      body,
+      String? responseType,
+      encoding,
+      progressCallback}) async {
+    final codec = ContentCodec.tson();
+    final endpoint = Uri.parse('$url').pathSegments.last;
+    if (endpoint == 'grantRole' || endpoint == 'revokeRole') {
+      final params = Map<String, Object?>.from(codec.decode(body) as Map);
+      final row = (report['rows'] as List)
+          .cast<Map<String, Object?>>()
+          .firstWhere((r) => r['name'] == params['username']);
+      final roles = [...(row['roles'] as List).cast<String>()];
+      endpoint == 'grantRole'
+          ? roles.add('${params['role']}')
+          : roles.remove(params['role']);
+      row['roles'] = roles;
+      calls.add('$endpoint ${params['username']} ${params['role']}');
+      return _FakeResponse(codec.encode(roles));
+    }
+    calls.add(endpoint);
+    return _FakeResponse(codec.encode(json.encode(report)));
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) =>
       throw UnimplementedError('${invocation.memberName}');
 }
 
-/// The real [DashboardData.users], over a server that answers [report].
+/// The real [DashboardData.users] and [DashboardData.changeRole], over a
+/// server that answers [report].
 class _ReportData extends DashboardData {
-  final Map<String, Object?> report;
-  _ReportData(this.report) : super(fakeAdminSession());
+  final _ReportClient client;
+  _ReportData(Map<String, Object?> report)
+      : client = _ReportClient(report),
+        super(fakeAdminSession());
 
   @override
-  AdminApi get adminApi =>
-      AdminApi(Uri.parse('https://tercen.example'), _ReportClient(report));
+  AdminApi get adminApi => AdminApi(Uri.parse('https://tercen.example'), client);
 }
 
 /// [count] invented users, newest first; `user-007` has no createdDate.
@@ -65,16 +87,19 @@ List<Map<String, Object?>> _rows(int count) => [
         }
     ];
 
-Future<void> _pump(WidgetTester tester, Map<String, Object?> report) async {
+Future<_ReportData> _pump(
+    WidgetTester tester, Map<String, Object?> report) async {
+  final data = _ReportData(report);
   tester.view
     ..physicalSize = const Size(1280, 1600)
     ..devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(MaterialApp(
     theme: DashboardTheme.light,
-    home: Scaffold(body: UsersScreen(data: _ReportData(report))),
+    home: Scaffold(body: UsersScreen(data: data)),
   ));
   await tester.pumpAndSettle();
+  return data;
 }
 
 /// The panel refreshes on a timer; unmount so it does not outlive the test.
@@ -139,6 +164,82 @@ void main() {
       expect(_banner(tester),
           'Showing 1000 of 1840 users — the server returned only the first '
           '1000');
+      await _unmount(tester);
+    });
+
+    testWidgets('truncated with no total does not blame the limit',
+        (tester) async {
+      // 480 rows is not the limit of 1000: the server said the list is
+      // incomplete and nothing more, so the line says only that.
+      await _pump(tester, {'rows': _rows(480), 'truncated': true});
+
+      expect(_banner(tester),
+          'Showing 480 of the first 480 users — the server reported the list '
+          'as incomplete; it does not report a total');
+      expect(_banner(tester), isNot(contains('limit')));
+      await _unmount(tester);
+    });
+
+    testWidgets('grants and revokes a role from a row on page 3',
+        (tester) async {
+      final data = await _pump(tester,
+          {'rows': _rows(150), 'total': 150, 'truncated': false});
+
+      await tester.ensureVisible(find.byTooltip('Last page'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Last page'));
+      await tester.pumpAndSettle();
+      expect(find.text('101–150 of 150'), findsOneWidget);
+
+      /// The role menu on user-120's row: the one level with its name.
+      Finder roleMenu() {
+        final nameY = tester.getCenter(find.text('user-120')).dy;
+        final menus = find.byTooltip('Change roles');
+        final index = List.generate(menus.evaluate().length, (i) => i)
+            .firstWhere(
+                (i) => (tester.getCenter(menus.at(i)).dy - nameY).abs() < 4);
+        return menus.at(index);
+      }
+
+      Future<void> pick(String role) async {
+        await tester.ensureVisible(roleMenu());
+        await tester.pumpAndSettle();
+        await tester.tap(roleMenu());
+        await tester.pumpAndSettle();
+        await tester.tap(find.descendant(
+            of: find.byType(PopupMenuItem<String>),
+            matching: find.text(role)));
+        await tester.pumpAndSettle();
+      }
+
+      /// After the refresh the page is kept and user-120's row is on it.
+      void expectPageKept() {
+        expect(find.text('101–150 of 150'), findsOneWidget);
+        expect(find.text('user-101'), findsOneWidget);
+        expect(find.text('user-120'), findsOneWidget);
+        expect(find.text('user-001'), findsNothing);
+      }
+
+      expect(find.text('operator'), findsNothing);
+      data.client.calls.clear();
+      await pick('operator');
+
+      expect(data.client.calls, ['grantRole user-120 operator', 'listUsers']);
+      expectPageKept();
+      // The new chip sits in user-120's row.
+      expect(find.text('operator'), findsOneWidget);
+      expect(
+          (tester.getCenter(find.text('operator')).dy -
+                  tester.getCenter(find.text('user-120')).dy)
+              .abs(),
+          lessThan(4));
+
+      data.client.calls.clear();
+      await pick('operator');
+
+      expect(data.client.calls, ['revokeRole user-120 operator', 'listUsers']);
+      expectPageKept();
+      expect(find.text('operator'), findsNothing);
       await _unmount(tester);
     });
 
