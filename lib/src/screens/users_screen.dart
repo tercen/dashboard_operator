@@ -245,9 +245,10 @@ class _ActivityEntry extends StatelessWidget {
   const _ActivityEntry(this.entry, this.data);
 
   /// The object's page: a workflow's own, anything else its project's.
+  /// None without an owner.
   static String? url(DashboardData data, ActivityObject e) {
     final owner = e.owner;
-    if (owner == null || e.isDeleted) return null;
+    if (owner == null) return null;
     if (e.kind == 'Workflow') return data.workflowUrl(owner, e.id);
     final projectId = e.projectId.isNotEmpty
         ? e.projectId
@@ -259,7 +260,7 @@ class _ActivityEntry extends StatelessWidget {
   Widget build(BuildContext context) {
     final muted = StateChip.colorsFor(context, Severity.neutral).$2;
     final label = entry.name.isNotEmpty ? entry.name : entry.kind;
-    final link = url(data, entry);
+    final link = entry.isDeleted ? null : url(data, entry);
     final Widget text;
     if (entry.isDeleted) {
       text = Row(mainAxisSize: MainAxisSize.min, children: [
