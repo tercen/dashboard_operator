@@ -514,11 +514,11 @@ class _UsersScreenState extends State<UsersScreen> {
     super.dispose();
   }
 
-  /// Keeps [filters], and reloads the activity when they name another
-  /// window.
+  /// Keeps [filters], and reloads the activity when they name a window
+  /// other than the one last asked for — which, for MAU, is also the case
+  /// once the UTC day has moved on since.
   void _setFilters(UserFilters filters) {
-    final reload =
-        filters.window(widget.data.now()) != _filters.window(widget.data.now());
+    final reload = filters.window(widget.data.now()) != _window;
     setState(() {
       _filters = filters;
       _filterChanges++;

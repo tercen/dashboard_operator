@@ -1199,8 +1199,12 @@ void main() {
         expect(mau.window(DateTime.utc(2026, 3, 1, 0, 30)),
             const ActivityWindow('2026-01-31', '2026-03-01'));
         // A local clock counts on its UTC day.
-        final local = DateTime.utc(2026, 10, 15, 23, 30).toLocal();
-        expect(mau.window(local).to, '2026-10-15');
+        // 23:30 and 00:30 UTC: one of them is on another local day in
+        // every zone but UTC.
+        expect(mau.window(DateTime.utc(2026, 10, 15, 23, 30).toLocal()).to,
+            '2026-10-15');
+        expect(mau.window(DateTime.utc(2026, 10, 15, 0, 30).toLocal()).to,
+            '2026-10-15');
       });
 
       test('all time and a custom window', () {
@@ -1228,6 +1232,9 @@ void main() {
         expect(f.excludes(u('a@sub.example.test')), isFalse);
         expect(f.excludes(u('a@lab.example', domain: 'example.test')), isFalse);
         expect(f.excludes(u('no-at-sign')), isFalse);
+        // After the last "@", and trimmed on the email's side too.
+        expect(f.excludes(u('a@b@example.test')), isTrue);
+        expect(f.excludes(u('a@example.test ')), isTrue);
         expect(normalizeDomain('  @Example.TEST '), 'example.test');
       });
 
@@ -1404,6 +1411,51 @@ void main() {
       expect(names(tester), ['act-1', 'act-2', 'lower', 'sub', 'col', 'act-3']);
       expect(find.text('99'), findsNothing);
       await _unmount(tester);
+    });
+
+    group('the UTC day rolls over after a MAU load', () {
+      /// MAU loaded on 15 October 2026 at 12:00 UTC; the clock then moves
+      /// to 00:30 UTC on the 16th, whose MAU is 17 September – 16 October.
+      Future<_ReportData> rollOver(WidgetTester tester) async {
+        final data = await _pump(tester, report(),
+            activity: activity(mauWindow),
+            filters: const UserFilters(mode: WindowMode.mau));
+        expect(data.client.activityParams.single,
+            {'from': '2026-09-16', 'to': '2026-10-15', 'budget': 0});
+        data
+          ..clock = DateTime.utc(2026, 10, 16, 0, 30)
+          ..client.activity = activity(('2026-09-17', '2026-10-16'));
+        return data;
+      }
+
+      testWidgets('a chosen window equal to the new MAU is fetched',
+          (tester) async {
+        final data = await rollOver(tester);
+        await _chooseWindow(tester, '2026-09-17', '2026-10-16');
+
+        expect(data.client.activityParams, [
+          {'from': '2026-09-16', 'to': '2026-10-15', 'budget': 0},
+          {'from': '2026-09-17', 'to': '2026-10-16', 'budget': 0},
+        ]);
+        expect(
+            find.byTooltip('Days with activity, 2026-09-17 – 2026-10-16 (UTC)'),
+            findsOneWidget);
+        await _unmount(tester);
+      });
+
+      testWidgets('pressing MAU again fetches the new day\'s MAU',
+          (tester) async {
+        final data = await rollOver(tester);
+        await tester.tap(find.byKey(const Key('filter-mau')));
+        await tester.pumpAndSettle();
+
+        expect(data.client.activityParams, [
+          {'from': '2026-09-16', 'to': '2026-10-15', 'budget': 0},
+          {'from': '2026-09-17', 'to': '2026-10-16', 'budget': 0},
+        ]);
+        expect(note(tester), startsWith('MAU, 2026-09-17 – 2026-10-16 (UTC)'));
+        await _unmount(tester);
+      });
     });
 
     testWidgets('excluding example.test removes its rows from list and count',
