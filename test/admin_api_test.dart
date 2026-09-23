@@ -7,6 +7,7 @@ import 'package:sci_http_client/http_client.dart' as http_api;
 
 import 'package:tercen_dashboard/src/admin_api.dart';
 import 'package:tercen_dashboard/src/data.dart';
+import 'package:tercen_dashboard/src/user_activity.dart';
 
 class _FakeResponse implements http_api.Response {
   @override
@@ -140,6 +141,52 @@ void main() {
       expect(answer.rows, hasLength(1));
       expect(answer.total, isNull);
       expect(answer.truncated, isNull);
+    });
+  });
+
+  group('listUserActivity', () {
+    test('posts the window and budget to the admin route', () async {
+      // The shelf wraps the service's JSON string in a one-element list.
+      final client = _FakeClient(_FakeResponse(
+          200,
+          codec.encode([
+            json.encode({
+              'budget': 20000,
+              'window': {'from': '2026-08-01', 'to': '2026-08-31'},
+              'rows': [
+                {
+                  'id': 'user-ada',
+                  'name': 'ada',
+                  'domain': '',
+                  'activeDays': 9,
+                  'activeDaysInWindow': 2,
+                  'recent': [],
+                  'truncated': false,
+                  'windowTruncated': false,
+                },
+              ],
+            })
+          ])));
+      final answer = UserActivityReport.fromJson(await AdminApi(base, client)
+          .listUserActivity(from: '2026-08-01', to: '2026-08-31'));
+
+      expect(client.lastUri.toString(),
+          'https://tercen.example/api/v1/admin/listUserActivity');
+      expect(codec.decode(client.lastBody),
+          {'from': '2026-08-01', 'to': '2026-08-31', 'budget': 0});
+      expect(answer.window, const ActivityWindow('2026-08-01', '2026-08-31'));
+      expect(answer.budget, 20000);
+      expect(answer[('', 'user-ada')]?.activeDaysInWindow, 2);
+    });
+
+    test('a server without the route: 404, raised as unavailable', () async {
+      final client = _FakeClient(_FakeResponse(404, ''));
+      await expectLater(
+        AdminApi(base, client).listUserActivity(),
+        throwsA(isA<ServiceError>()
+            .having((e) => e.statusCode, 'statusCode', 404)
+            .having((e) => e.error, 'error', AdminApi.unavailableCode)),
+      );
     });
   });
 }

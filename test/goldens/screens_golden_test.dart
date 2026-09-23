@@ -15,8 +15,8 @@ import '../support/fake_data.dart';
 /// Every screen, in both themes, on invented data (test/support), plus the
 /// narrow layout with its drawer open, the "Not authorized" page, the
 /// manager's shell, the Users table paged, truncated, with many or very
-/// long tags and with its widest row, and the Create user dialog filled in
-/// and refused. The PNGs under test/goldens/ are what the Tercen colour
+/// long tags, with its widest row, with a user's activity open and while
+/// the activity loads, and the Create user dialog filled in and refused. The PNGs under test/goldens/ are what the Tercen colour
 /// scheme looks like; update them with
 /// `flutter test --update-goldens test/goldens`.
 void main() {
@@ -112,8 +112,10 @@ void main() {
     }
 
     // The widest row the fixtures allow, at 1280 px with the bundled fonts:
-    // every role, a four-digit count, two full tag chips and "+998". It
-    // all fits inside the card; the edge test below measures it.
+    // every role, a cut object name with "+9", a four-digit lower bound, a
+    // four-digit count, two full tag chips and "+998". With the activity
+    // columns it is wider than the card: the table scrolls, with its
+    // scrollbar showing. The edge tests below measure it.
     testWidgets('Users, worst-case row, $name theme', (tester) async {
       await _pumpApp(tester, mode, fakeAdminSession(),
           data: TaggedUsersData.worstCase());
@@ -122,6 +124,42 @@ void main() {
       expect(find.text('+998'), findsOneWidget);
       _expectSelected(tester, sections.indexOf('Users'));
       await _expectGolden('users_worst_case_$name.png');
+      await _unmount(tester);
+    });
+
+    // The activity columns open for ada: her last ten objects in her row —
+    // links, a deleted workflow struck through, a file whose project is gone
+    // as plain text — beside a lower-bound count, "none", and linus's
+    // unknowns.
+    testWidgets('Users, activity open, $name theme', (tester) async {
+      await _pumpApp(tester, mode, fakeAdminSession());
+      await _openUsers(tester);
+      await tester.tap(find.byKey(const Key('activity-toggle')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('activity-expanded')), findsOneWidget);
+      expect(find.text('Panel 9 analysis'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      _expectSelected(tester, sections.indexOf('Users'));
+      await _expectGolden('users_activity_open_$name.png');
+      await _unmount(tester);
+    });
+
+    // While listUserActivity is still counting: the list is there, the
+    // activity cells say so, and a line above the table explains.
+    testWidgets('Users, activity loading, $name theme', (tester) async {
+      await _pumpApp(tester, mode, fakeAdminSession(),
+          data: ActivityLoadingData(), settle: false);
+      await tester.tap(find.descendant(
+          of: find.byType(NavigationRail), matching: find.text('Users')));
+      // The spinner never settles: step past the rail's transition instead.
+      for (var i = 0; i < 20; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+
+      expect(find.text('ada'), findsOneWidget);
+      expect(find.byKey(const Key('activity-loading')), findsNWidgets(10));
+      await _expectGolden('users_activity_loading_$name.png');
       await _unmount(tester);
     });
 
@@ -193,19 +231,37 @@ void main() {
     });
   }
 
-  // The edge of the worst case: at 1280 px with the bundled fonts, the
-  // widest row the fixtures allow fits inside the card. Nothing overflows,
-  // there is nothing to scroll to, and the "+N" chip — the last thing in
-  // the row — ends inside the card and the screen.
-  testWidgets('Users, worst-case row fits at 1280 px', (tester) async {
+  // At 1280 px the worst-case row, activity columns included, is wider
+  // than the card: nothing overflows, the table scrolls, and its
+  // scrollbar shows.
+  testWidgets('Users, worst-case row scrolls at 1280 px', (tester) async {
     await _pumpApp(tester, ThemeMode.light, fakeAdminSession(),
         data: TaggedUsersData.worstCase());
     await _openUsers(tester);
 
     expect(tester.takeException(), isNull);
     expect(tester.view.physicalSize.width, 1280);
+    expect(_tableScroll(tester).maxScrollExtent, greaterThan(0));
+    final scrollbar = tester.widget<Scrollbar>(find
+        .ancestor(of: find.byType(DataTable), matching: find.byType(Scrollbar))
+        .first);
+    expect(scrollbar.thumbVisibility, isTrue);
+    await _unmount(tester);
+  });
+
+  // The edge of the worst case: at 1728 px (a 16-inch laptop) with the
+  // bundled fonts, the widest row the fixtures allow fits inside the card.
+  // Nothing overflows, there is nothing to scroll to, and the "+N" chip —
+  // the last thing in the row — ends inside the card and the screen.
+  testWidgets('Users, worst-case row fits at 1728 px', (tester) async {
+    await _pumpApp(tester, ThemeMode.light, fakeAdminSession(),
+        data: TaggedUsersData.worstCase(), size: const Size(1728, 800));
+    await _openUsers(tester);
+
+    expect(tester.takeException(), isNull);
+    expect(tester.view.physicalSize.width, 1728);
     final card = tester.getRect(find.byType(PaginatedDataTable));
-    expect(card.right, lessThanOrEqualTo(1280));
+    expect(card.right, lessThanOrEqualTo(1728));
     expect(tester.getRect(find.byType(DataTable)).right,
         lessThanOrEqualTo(card.right));
     // The table's own width, before the card stretches it: at least 16 px
@@ -222,15 +278,21 @@ void main() {
             matching: find.byType(Text))).data,
         '+998');
     expect(more.right, lessThanOrEqualTo(card.right));
-    // Every text in the table, the "+N" label included, is laid out whole:
-    // no text is cut by its cell.
+    // Every text in the table, the "+N" labels and "≥1234" included, is
+    // laid out whole: no text is cut by its cell. The long tags (W…) and
+    // the long object name (M…) are cut on purpose, with an ellipsis.
+    expect(find.text('≥1234'), findsOneWidget);
     for (final element in find
         .descendant(of: find.byType(DataTable), matching: find.byType(Text))
         .evaluate()) {
       final text = element.widget as Text;
       final paragraph = element.renderObject as RenderParagraph?;
       final label = text.data ?? '';
-      if (paragraph == null || label.startsWith('W')) continue;
+      if (paragraph == null ||
+          label.startsWith('W') ||
+          label.startsWith('MMM')) {
+        continue;
+      }
       expect(paragraph.didExceedMaxLines, isFalse, reason: label);
       expect(paragraph.size.width,
           greaterThanOrEqualTo(paragraph.getMaxIntrinsicWidth(0) - 0.5),
@@ -296,6 +358,7 @@ Future<void> _pumpApp(
   DashboardSession session, {
   Size size = const Size(1280, 800),
   FakeDashboardData? data,
+  bool settle = true,
 }) async {
   tester.view
     ..physicalSize = size
@@ -318,7 +381,7 @@ Future<void> _pumpApp(
   ));
   // Load, let the workflow-name lookups resolve, and finish every
   // transition before anything is captured.
-  await tester.pumpAndSettle();
+  if (settle) await tester.pumpAndSettle();
 }
 
 void _expectSelected(WidgetTester tester, int index) {

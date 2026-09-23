@@ -6,6 +6,7 @@ import 'package:sci_tercen_client/sci_client.dart' as sci;
 import 'admin_api.dart';
 import 'session.dart';
 import 'usage.dart';
+import 'user_activity.dart';
 
 /// Data access for the dashboard panels, on top of the existing API surface.
 /// Server-side authorization is the boundary: every call here is made with the
@@ -105,6 +106,21 @@ class DashboardData {
         viaFallback: true,
         limit: limit,
       );
+    }
+  }
+
+  /// Per-user activity for the Users page (tercen/sci#1667), counted over
+  /// [window]. Null from a server without listUserActivity: the page then
+  /// leaves the activity columns blank. Slow — seconds for thousands of
+  /// users — so the page loads it beside the list, never before it.
+  Future<UserActivityReport?> userActivity(
+      {ActivityWindow window = const ActivityWindow.allTime()}) async {
+    try {
+      return UserActivityReport.fromJson(await adminApi.listUserActivity(
+          from: window.from, to: window.to));
+    } on ServiceError catch (e) {
+      if (e.statusCode == 404) return null;
+      rethrow;
     }
   }
 

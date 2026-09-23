@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -8,27 +9,50 @@ import 'package:sci_http_client/http_client.dart' as http_api;
 import 'package:tercen_dashboard/src/admin_api.dart';
 import 'package:tercen_dashboard/src/data.dart';
 import 'package:tercen_dashboard/src/screens/users_screen.dart';
+import 'package:tercen_dashboard/src/screens/tasks_screen.dart';
 import 'package:tercen_dashboard/src/theme.dart';
+import 'package:tercen_dashboard/src/user_activity.dart';
 
 import 'support/fake_data.dart';
 
 class _FakeResponse implements http_api.Response {
   @override
-  final int statusCode = 200;
+  final int statusCode;
   @override
   final Map? headers = const {};
   @override
   final Object? body;
-  _FakeResponse(this.body);
+  _FakeResponse(this.body, {this.statusCode = 200});
 }
 
 /// Answers listUsers with [report], and grantRole/revokeRole as a server
 /// would: the change is recorded in [report]'s rows, so the next listUsers
 /// shows it, and the call answers with the user's new roles.
+///
+/// listUserActivity answers with [activity] once [activityGate] (if any)
+/// completes, fails with [activityStatus] when that is not 200, and is a
+/// 404 — a server before tercen/sci#1667 — when [activity] is null.
+/// With [holdActivity], each listUserActivity call is instead held in
+/// [held] until the test answers that one call ([answerHeld], [failHeld]).
 class _ReportClient implements http_api.HttpClient {
   final Map<String, Object?> report;
   final List<String> calls = [];
+  Map<String, Object?>? activity;
+  int activityStatus = 200;
+  Future<void>? activityGate;
+  bool holdActivity = false;
+  final List<Completer<http_api.Response>> held = [];
+  final List<Map<String, Object?>> activityParams = [];
   _ReportClient(this.report);
+
+  /// Answers held call [i] with [activity].
+  void answerHeld(int i, Map<String, Object?> activity) => held[i].complete(
+      _FakeResponse(ContentCodec.tson().encode([json.encode(activity)])));
+
+  /// Fails held call [i] as a server error would.
+  void failHeld(int i) => held[i].complete(_FakeResponse(
+      ContentCodec.tson().encode({'error': 'admin.invented', 'reason': 'invented'}),
+      statusCode: 500));
 
   @override
   Future<http_api.Response> post(url,
@@ -52,6 +76,23 @@ class _ReportClient implements http_api.HttpClient {
       calls.add('$endpoint ${params['username']} ${params['role']}');
       return _FakeResponse(codec.encode(roles));
     }
+    if (endpoint == 'listUserActivity') {
+      activityParams.add(Map<String, Object?>.from(codec.decode(body) as Map));
+      if (holdActivity) {
+        final call = Completer<http_api.Response>();
+        held.add(call);
+        return call.future;
+      }
+      await activityGate;
+      final activity = this.activity;
+      if (activity == null) return _FakeResponse('', statusCode: 404);
+      if (activityStatus != 200) {
+        return _FakeResponse(
+            codec.encode({'error': 'admin.invented', 'reason': 'invented'}),
+            statusCode: activityStatus);
+      }
+      return _FakeResponse(codec.encode([json.encode(activity)]));
+    }
     calls.add(endpoint);
     return _FakeResponse(codec.encode(json.encode(report)));
   }
@@ -67,7 +108,8 @@ class _ReportData extends DashboardData {
   final _ReportClient client;
   _ReportData(Map<String, Object?> report)
       : client = _ReportClient(report),
-        super(fakeAdminSession());
+        super(fakeAdminSession()
+          ..serviceBase = Uri.parse('https://tercen.example'));
 
   @override
   AdminApi get adminApi => AdminApi(Uri.parse('https://tercen.example'), client);
@@ -87,20 +129,50 @@ List<Map<String, Object?>> _rows(int count) => [
         }
     ];
 
+/// The Users page over a server that answers [report], and [activity]
+/// for listUserActivity (none: the route is missing). With a [gate] the
+/// activity waits for it, and with [hold] each call waits for the test to
+/// answer it; either way the page is pumped, not settled: its loading
+/// spinner never settles.
 Future<_ReportData> _pump(
-    WidgetTester tester, Map<String, Object?> report) async {
+  WidgetTester tester,
+  Map<String, Object?> report, {
+  Map<String, Object?>? activity,
+  int activityStatus = 200,
+  Future<void>? gate,
+  bool hold = false,
+  ActivityWindow window = const ActivityWindow.allTime(),
+}) async {
   final data = _ReportData(report);
+  data.client
+    ..activity = activity
+    ..activityStatus = activityStatus
+    ..activityGate = gate
+    ..holdActivity = hold;
   tester.view
     ..physicalSize = const Size(1280, 1600)
     ..devicePixelRatio = 1;
   addTearDown(tester.view.reset);
-  await tester.pumpWidget(MaterialApp(
-    theme: DashboardTheme.light,
-    home: Scaffold(body: UsersScreen(data: data)),
-  ));
-  await tester.pumpAndSettle();
+  await tester.pumpWidget(_app(data, window));
+  if (gate == null && !hold) {
+    await tester.pumpAndSettle();
+  } else {
+    await _pumpFrames(tester);
+  }
   return data;
 }
+
+/// A few frames, for a page whose loading spinner never settles.
+Future<void> _pumpFrames(WidgetTester tester) async {
+  for (var i = 0; i < 5; i++) {
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+}
+
+Widget _app(DashboardData data, ActivityWindow window) => MaterialApp(
+      theme: DashboardTheme.light,
+      home: Scaffold(body: UsersScreen(data: data, activityWindow: window)),
+    );
 
 /// The panel refreshes on a timer; unmount so it does not outlive the test.
 Future<void> _unmount(WidgetTester tester) =>
@@ -148,6 +220,86 @@ List<Map<String, Object?>> _w3Rows() => [
           'projectsOwned': owned,
         }
     ];
+
+/// [_w3Rows] as a server with tercen/sci#1663 reports them.
+Map<String, Object?> _w3Report() =>
+    {'rows': _w3Rows(), 'total': 3, 'truncated': false};
+
+/// listUserActivity's answer for [_w3Rows], invented, in tercen/sci#1667's
+/// shape. user-a has ten objects: a workflow and a project on others'
+/// projects, a deleted workflow, a file whose project is gone (owner
+/// null), and six more workflows. user-b was read and has none; the server
+/// could not read user-c (nulls). With a [window], user-a has 7 days in it.
+Map<String, Object?> _activity({(String, String)? window}) {
+  Map<String, Object?> object(String kind, String id, String name,
+          {String type = 'update',
+          String projectId = 'pr-1',
+          String? owner = 'team-x'}) =>
+      {
+        'kind': kind,
+        'id': id,
+        'name': name,
+        'type': type,
+        'date': '2026-09-20T10:00:00.000Z',
+        'projectId': projectId,
+        'projectName': 'Invented project',
+        'owner': owner,
+      };
+  return {
+    'budget': 20000,
+    'dayBoundary': 'UTC',
+    'window': window == null ? null : {'from': window.$1, 'to': window.$2},
+    'truncatedUsers': 0,
+    'rows': [
+      {
+        'id': 'id-user-a',
+        'name': 'user-a',
+        'domain': '',
+        'activeDays': 40,
+        'activeDaysInWindow': window == null ? null : 7,
+        'recent': [
+          object('Workflow', 'wf-a1', 'Gating'),
+          object('Project', 'pr-2', 'Pilot', projectId: 'pr-2', owner: 'user-a'),
+          object('Workflow', 'wf-a3', 'Old flow', type: 'delete'),
+          object('FileDocument', 'fd-1', 'plate.csv',
+              projectId: 'pr-9', owner: null),
+          for (var i = 5; i <= 10; i++) object('Workflow', 'wf-a$i', 'Flow $i'),
+        ],
+        'scanned': 120,
+        'oldestScanned': '2025-01-01T00:00:00.000Z',
+        'truncated': false,
+        'windowTruncated': window == null ? null : false,
+      },
+      {
+        'id': 'id-user-b',
+        'name': 'user-b',
+        'domain': 'north',
+        'activeDays': 0,
+        'activeDaysInWindow': window == null ? null : 0,
+        'recent': <Object>[],
+        'scanned': 0,
+        'oldestScanned': null,
+        'truncated': false,
+        'windowTruncated': window == null ? null : false,
+      },
+      {
+        'id': 'id-user-c',
+        'name': 'user-c',
+        'domain': 'north',
+        'activeDays': null,
+        'activeDaysInWindow': null,
+        'recent': null,
+        'scanned': null,
+        'oldestScanned': null,
+        'truncated': null,
+        'windowTruncated': null,
+      },
+    ],
+  };
+}
+
+String _status(WidgetTester tester) =>
+    tester.widget<Text>(find.byKey(const Key('activity-status'))).data!;
 
 String _banner(WidgetTester tester) =>
     tester.widget<Text>(find.byKey(const Key('users-banner'))).data!;
@@ -496,6 +648,401 @@ void main() {
         await _unmount(tester);
       });
     }
+  });
+
+  group('activity columns (tercen/sci#1667)', () {
+    /// The URL of every link in the table, top to bottom.
+    List<String> links(WidgetTester tester) => [
+          for (final link
+              in tester.widgetList<LinkText>(find.byType(LinkText)))
+            link.url,
+        ];
+
+    testWidgets('the list shows at once; the activity cells load after it',
+        (tester) async {
+      final gate = Completer<void>();
+      final data = await _pump(tester, _w3Report(),
+          activity: _activity(), gate: gate.future);
+
+      // listUsers is on screen, every row with its role control, while
+      // listUserActivity has not answered.
+      expect(_banner(tester), 'Showing 3 of 3 users');
+      expect(find.text('user-a'), findsOneWidget);
+      expect(find.byTooltip('Change roles'), findsNWidgets(3));
+      expect(find.text('LAST\nWORKED ON'), findsOneWidget);
+      expect(find.text('ACTIVE\nDAYS'), findsOneWidget);
+      // Three rows, two activity cells each, all loading.
+      expect(find.byKey(const Key('activity-loading')), findsNWidgets(6));
+      expect(_status(tester),
+          'Loading activity — the table can be used meanwhile');
+      expect(_rowTexts(tester, 'user-a'), [
+        'user-a',
+        'user-a@example.test',
+        'default',
+        '2026-09-01 12:00',
+        '…',
+        '…',
+        '4',
+        'pilot',
+        'beta',
+      ]);
+
+      // The table is usable meanwhile: the filter narrows it, the role
+      // menu opens.
+      await tester.enterText(find.byType(TextField), 'user-b');
+      await tester.pump();
+      expect(_banner(tester), 'Showing 1 of 3 users');
+      expect(find.text('user-a'), findsNothing);
+      await tester.tap(find.byTooltip('Change roles'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byType(PopupMenuItem<String>), findsNWidgets(3));
+      await tester.tapAt(const Offset(4, 4));
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.enterText(find.byType(TextField), '');
+      await tester.pump();
+
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('activity-loading')), findsNothing);
+      expect(find.byKey(const Key('activity-status')), findsNothing);
+      expect(_rowTexts(tester, 'user-a'), [
+        'user-a',
+        'user-a@example.test',
+        'default',
+        '2026-09-01 12:00',
+        'Gating',
+        '+9',
+        '40',
+        '4',
+        'pilot',
+        'beta',
+      ]);
+      // All time: empty from and to, the server's default budget.
+      expect(data.client.activityParams, [
+        {'from': '', 'to': '', 'budget': 0},
+      ]);
+      await _unmount(tester);
+    });
+
+    testWidgets('loaded: the latest object links to it; counts as sent',
+        (tester) async {
+      await _pump(tester, _w3Report(), activity: _activity());
+
+      expect(links(tester), ['https://tercen.example/team-x/w/wf-a1']);
+      // No window: no Days in window column.
+      expect(find.text('DAYS IN\nWINDOW'), findsNothing);
+      await _unmount(tester);
+    });
+
+    testWidgets('expands in place to the last ten objects and collapses',
+        (tester) async {
+      await _pump(tester, _w3Report(), activity: _activity());
+      final collapsed = tester.getSize(find.byType(DataTable)).height;
+      expect(find.byKey(const Key('activity-expanded')), findsNothing);
+      expect(find.text('Pilot'), findsNothing);
+
+      await tester.tap(find.byKey(const Key('activity-toggle')));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      final open = find.byKey(const Key('activity-expanded'));
+      expect(open, findsOneWidget);
+      // In the row, not somewhere else: the table grew around it.
+      expect(tester.getSize(find.byType(DataTable)).height,
+          greaterThan(collapsed));
+      // Ten entries, each with its details on hover.
+      expect(find.descendant(of: open, matching: find.byType(Tooltip)),
+          findsNWidgets(10));
+      for (final name in [
+        'Gating',
+        'Pilot',
+        'Old flow',
+        'plate.csv',
+        for (var i = 5; i <= 10; i++) 'Flow $i',
+      ]) {
+        expect(find.descendant(of: open, matching: find.text(name)),
+            findsOneWidget,
+            reason: name);
+      }
+      // Every link, on its exact URL: a workflow at /<owner>/w/<id>,
+      // anything else at its project's /<owner>/p/<projectId>. The owner
+      // is the entry's, not the user's.
+      expect(links(tester), [
+        'https://tercen.example/team-x/w/wf-a1',
+        'https://tercen.example/user-a/p/pr-2',
+        for (var i = 5; i <= 10; i++) 'https://tercen.example/team-x/w/wf-a$i',
+      ]);
+      // owner null: plain text, no link.
+      expect(
+          find.ancestor(
+              of: find.text('plate.csv'), matching: find.byType(LinkText)),
+          findsNothing);
+      // Deleted: struck through, marked, and not linked.
+      final deleted = tester.widget<Text>(find.text('Old flow'));
+      expect(deleted.style?.decoration, TextDecoration.lineThrough);
+      expect(find.byKey(const Key('activity-deleted')), findsOneWidget);
+      expect(
+          find.ancestor(
+              of: find.text('Old flow'), matching: find.byType(LinkText)),
+          findsNothing);
+
+      await tester.tap(find.byKey(const Key('activity-toggle')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('activity-expanded')), findsNothing);
+      expect(find.text('Pilot'), findsNothing);
+      expect(find.text('+9'), findsOneWidget);
+      expect(tester.getSize(find.byType(DataTable)).height, collapsed);
+      await _unmount(tester);
+    });
+
+    testWidgets('an open row stays open on a later page and back',
+        (tester) async {
+      // Open on page 1, go to page 2 and back: still open.
+      final rows = [
+        ..._w3Rows(),
+        for (var i = 1; i <= 60; i++)
+          {
+            'id': 'id-extra-$i',
+            'name': 'extra-${i.toString().padLeft(2, '0')}',
+            'email': 'extra$i@example.test',
+            'domain': 'north',
+            'roles': ['user'],
+            'isValidated': true,
+            'createdDate': '2026-09-01T12:00:00',
+          },
+      ];
+      await _pump(tester, {'rows': rows, 'total': 63, 'truncated': false},
+          activity: _activity());
+      await tester.tap(find.byKey(const Key('activity-toggle')));
+      await tester.pumpAndSettle();
+      await _nextPage(tester);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('51–63 of 63'), findsOneWidget);
+      expect(find.byKey(const Key('activity-expanded')), findsNothing);
+      await tester.ensureVisible(find.byTooltip('Previous page'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Previous page'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('activity-expanded')), findsOneWidget);
+      await _unmount(tester);
+    });
+
+    testWidgets('null is unknown and looks it; 0 and none are values',
+        (tester) async {
+      await _pump(tester, _w3Report(), activity: _activity());
+
+      // Counted, nothing found: "none" and 0.
+      expect(_rowTexts(tester, 'user-b').sublist(4), ['none', '0', '0']);
+      // Not read: "unknown" in both cells, never 0 or blank.
+      expect(_rowTexts(tester, 'user-c').sublist(4),
+          ['unknown', 'unknown', 'unknown', 'beta']);
+      final unknown = tester.widget<Text>(find.descendant(
+          of: find.byKey(const Key('active-days-unknown')),
+          matching: find.byType(Text)));
+      expect(unknown.style?.fontStyle, FontStyle.italic);
+      final zero = tester.widgetList<Text>(find.text('0')).first;
+      expect(zero.style?.fontStyle, isNot(FontStyle.italic));
+      expect(find.byKey(const Key('recent-unknown')), findsOneWidget);
+      expect(find.byTooltip("The server could not read this user's activity"),
+          findsNWidgets(2));
+      expect(find.text('null'), findsNothing);
+      await _unmount(tester);
+    });
+
+    testWidgets('a truncated count is a lower bound, marked ≥',
+        (tester) async {
+      final activity = _activity(window: ('2026-08-01', '2026-08-31'));
+      final a = (activity['rows'] as List).first as Map<String, Object?>;
+      a['truncated'] = true;
+      a['windowTruncated'] = true;
+      final b = (activity['rows'] as List)[1] as Map<String, Object?>;
+      b['activeDays'] = 3;
+      b['activeDaysInWindow'] = 2;
+      final data = await _pump(tester, _w3Report(),
+          activity: activity,
+          window: const ActivityWindow('2026-08-01', '2026-08-31'));
+
+      // The window goes to the server, and the column shows.
+      expect(data.client.activityParams, [
+        {'from': '2026-08-01', 'to': '2026-08-31', 'budget': 0},
+      ]);
+      expect(find.text('DAYS IN\nWINDOW'), findsOneWidget);
+      expect(find.byTooltip('Days with activity, 2026-08-01 – 2026-08-31'),
+          findsOneWidget);
+      // Truncated: "≥", with the reason on hover.
+      expect(_rowTexts(tester, 'user-a').sublist(5, 8), ['+9', '≥40', '≥7']);
+      expect(find.byTooltip(RegExp(r'^At least 40: ')), findsOneWidget);
+      expect(find.byTooltip(RegExp(r'^At least 7: ')), findsOneWidget);
+      // Not truncated: the plain count.
+      expect(_rowTexts(tester, 'user-b').sublist(4, 7), ['none', '3', '2']);
+      await _unmount(tester);
+    });
+
+    testWidgets('a new window reloads the activity', (tester) async {
+      final data = await _pump(tester, _w3Report(), activity: _activity());
+      data.client.activity = _activity(window: ('2026-09-01', '2026-09-30'));
+      await tester.pumpWidget(
+          _app(data, const ActivityWindow('2026-09-01', '2026-09-30')));
+      await tester.pumpAndSettle();
+
+      expect(data.client.activityParams, [
+        {'from': '', 'to': '', 'budget': 0},
+        {'from': '2026-09-01', 'to': '2026-09-30', 'budget': 0},
+      ]);
+      expect(_rowTexts(tester, 'user-a').sublist(6, 8), ['40', '7']);
+      await _unmount(tester);
+    });
+
+    /// [_activity] for all time, but with user-a on 111 active days: a
+    /// value only the first, superseded request carries.
+    Map<String, Object?> staleActivity() {
+      final activity = _activity();
+      ((activity['rows'] as List).first as Map<String, Object?>)['activeDays'] =
+          111;
+      return activity;
+    }
+
+    /// The page asks for all time (request 0, held), then moves to a
+    /// window (request 1, held); request 1 answers first.
+    Future<_ReportData> supersede(WidgetTester tester) async {
+      final data = await _pump(tester, _w3Report(), hold: true);
+      await tester.pumpWidget(
+          _app(data, const ActivityWindow('2026-09-01', '2026-09-30')));
+      await _pumpFrames(tester);
+      expect(data.client.held, hasLength(2));
+      data.client
+          .answerHeld(1, _activity(window: ('2026-09-01', '2026-09-30')));
+      await tester.pumpAndSettle();
+      expect(_rowTexts(tester, 'user-a').sublist(6, 9), ['40', '7', '4']);
+      return data;
+    }
+
+    testWidgets('a late answer to a superseded window is dropped',
+        (tester) async {
+      final data = await supersede(tester);
+
+      data.client.answerHeld(0, staleActivity());
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      // The window's values stay; the old request's never show.
+      expect(_rowTexts(tester, 'user-a').sublist(6, 9), ['40', '7', '4']);
+      expect(find.text('111'), findsNothing);
+      expect(find.byKey(const Key('activity-status')), findsNothing);
+      await _unmount(tester);
+    });
+
+    testWidgets('a late failure of a superseded window is dropped',
+        (tester) async {
+      final data = await supersede(tester);
+
+      data.client.failHeld(0);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      // No error icon in the cells and no error line over the values.
+      expect(find.byKey(const Key('activity-error')), findsNothing);
+      expect(find.byKey(const Key('activity-status')), findsNothing);
+      expect(find.text('Retry'), findsNothing);
+      expect(_rowTexts(tester, 'user-a').sublist(6, 9), ['40', '7', '4']);
+      await _unmount(tester);
+    });
+
+    /// Mounts the page with its request held, unmounts it, then lets
+    /// [answer] complete the request.
+    Future<void> answerAfterUnmount(
+        WidgetTester tester, void Function(_ReportClient) answer) async {
+      final data = await _pump(tester, _w3Report(), hold: true);
+      expect(data.client.held, hasLength(1));
+      await _unmount(tester);
+      answer(data.client);
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('a value after the page is gone is dropped quietly',
+        (tester) async {
+      await answerAfterUnmount(tester, (c) => c.answerHeld(0, _activity()));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('an error after the page is gone is dropped quietly',
+        (tester) async {
+      await answerAfterUnmount(tester, (c) => c.failHeld(0));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('an error shows in the cells, the table works, retry loads',
+        (tester) async {
+      final data = await _pump(tester, _w3Report(),
+          activity: _activity(), activityStatus: 500);
+
+      expect(find.byKey(const Key('activity-error')), findsNWidgets(6));
+      expect(_status(tester), startsWith('Activity could not be loaded: '));
+      expect(_rowTexts(tester, 'user-a'), [
+        'user-a',
+        'user-a@example.test',
+        'default',
+        '2026-09-01 12:00',
+        '4',
+        'pilot',
+        'beta',
+      ]);
+      expect(find.byTooltip('Change roles'), findsNWidgets(3));
+
+      data.client.activityStatus = 200;
+      await tester.tap(find.text('Retry'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('activity-error')), findsNothing);
+      expect(_rowTexts(tester, 'user-a').sublist(4, 7), ['Gating', '+9', '40']);
+      expect(data.client.activityParams, hasLength(2));
+      await _unmount(tester);
+    });
+
+    testWidgets('a server without listUserActivity: blank cells, a note',
+        (tester) async {
+      final data = await _pump(tester, _w3Report());
+
+      expect(data.client.activityParams, hasLength(1));
+      expect(_status(tester),
+          'This server does not report user activity; those columns are '
+          'blank');
+      expect(find.byKey(const Key('activity-error')), findsNothing);
+      expect(find.byKey(const Key('activity-loading')), findsNothing);
+      // Every other cell as before; the activity cells are empty.
+      expect(_rowTexts(tester, 'user-a'), [
+        'user-a',
+        'user-a@example.test',
+        'default',
+        '2026-09-01 12:00',
+        '4',
+        'pilot',
+        'beta',
+      ]);
+      expect(find.byTooltip('Change roles'), findsNWidgets(3));
+      await _unmount(tester);
+    });
+
+    test('fromJson keeps null apart from 0 and drops an empty owner', () {
+      final report = UserActivityReport.fromJson(_activity());
+      final a = report[('', 'id-user-a')]!;
+      expect(a.activeDays, 40);
+      expect(a.activeDaysInWindow, isNull);
+      expect(a.recent, hasLength(10));
+      expect(a.recent![2].isDeleted, isTrue);
+      expect(a.recent![3].owner, isNull);
+      final b = report[('north', 'id-user-b')]!;
+      expect(b.activeDays, 0);
+      expect(b.recent, isEmpty);
+      final c = report[('north', 'id-user-c')]!;
+      expect(c.activeDays, isNull);
+      expect(c.recent, isNull);
+      // A user is named by domain and id together.
+      expect(report[('', 'id-user-b')], isNull);
+      expect(report.window, isNull);
+      expect(
+          ActivityObject.fromJson({'kind': 'Workflow', 'owner': ''}).owner,
+          isNull);
+    });
   });
 
   group('UserListing.mayHaveMore', () {
