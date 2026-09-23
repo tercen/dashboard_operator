@@ -601,11 +601,9 @@ class _UsersScreenState extends State<UsersScreen> {
     }
   }
 
-  /// Whether this admin may edit [user]'s tags from here: only on a row of
-  /// the admin's own domain. The user endpoints find a document by id in
-  /// the session's domain, and the default accounts have the same id in
-  /// every domain, so an edit from another domain's row would load and save
-  /// the admin's own domain's user of that id, not the one the row shows.
+  /// Whether this admin may edit [user]'s tags from here: tag and role
+  /// controls act on the admin's own domain, so they are shown only on its
+  /// rows.
   bool _canEditTags(DashboardUser user) =>
       widget.data.session.isAdmin && user.domain == widget.data.session.domain;
 

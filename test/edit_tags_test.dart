@@ -71,9 +71,8 @@ Map<String, Object?> _storedDoc({
 /// with that status. listUsers lists the stored documents of every domain;
 /// listUserActivity is missing (404).
 ///
-/// As on the server, GET and POST find a user by id in the session's
-/// [domain] only: [docs] are that domain's documents, [elsewhere] the other
-/// domains', which are listed but never reached by id.
+/// [docs] are the documents of the session's [domain], [elsewhere] the
+/// other domains', which are listed only.
 class _UserServer implements http_api.HttpClient {
   final String domain;
   final Map<String, Map<String, Object?>> docs;
@@ -485,30 +484,29 @@ void main() {
       await _unmount(tester);
     });
 
-    // The default accounts have the same id in every domain, and the user
-    // endpoints find an id in the session's domain. An edit from another
-    // domain's row would land on the admin's own domain's user.
-    testWidgets('the same id in two domains: only the own-domain row edits',
+    // Tag and role controls act on the admin's own domain, so they are
+    // shown only on its rows.
+    testWidgets('two domains listed: only the own-domain row edits',
         (tester) async {
-      final own = _storedDoc(id: 'user-same', tags: ['ours']);
+      final own = _storedDoc(id: 'user-a', tags: ['ours']);
       final other =
-          _storedDoc(id: 'user-same', domain: 'north', tags: ['theirs']);
+          _storedDoc(id: 'user-a', domain: 'north', tags: ['theirs']);
       final server = await _pump(tester, [own, other]);
 
       // Both rows are listed; only the default domain's has the control.
       expect(find.byTooltip('ours'), findsOneWidget);
       expect(find.byTooltip('theirs'), findsOneWidget);
-      expect(find.byKey(const Key('edit-tags--user-same')), findsOneWidget);
-      expect(find.byKey(const Key('edit-tags-north-user-same')), findsNothing);
+      expect(find.byKey(const Key('edit-tags--user-a')), findsOneWidget);
+      expect(find.byKey(const Key('edit-tags-north-user-a')), findsNothing);
       expect(find.byTooltip('Edit tags'), findsOneWidget);
 
-      // The own row edits the document it shows, and only that one.
-      await _open(tester, 'user-same');
+      // The own row edits its own document, and only that one.
+      await _open(tester, 'user-a');
       expect(_chips(tester), ['ours']);
       await _type(tester, 'gamma');
       await _save(tester);
       expect(_posted(server)['tags'], ['ours', 'gamma']);
-      expect(server.docs['user-same']!['tags'], ['ours', 'gamma']);
+      expect(server.docs['user-a']!['tags'], ['ours', 'gamma']);
       expect(server.elsewhere.single['tags'], ['theirs']);
       await _unmount(tester);
     });
@@ -516,17 +514,17 @@ void main() {
     testWidgets('an admin of another domain edits only that domain\'s rows',
         (tester) async {
       final server = await _pump(tester, [
-        _storedDoc(id: 'user-same', tags: ['default-tag']),
-        _storedDoc(id: 'user-same', domain: 'north', tags: ['north-tag']),
+        _storedDoc(id: 'user-a', tags: ['default-tag']),
+        _storedDoc(id: 'user-a', domain: 'north', tags: ['north-tag']),
       ], session: fakeAdminSession()..domain = 'north');
 
-      expect(find.byKey(const Key('edit-tags--user-same')), findsNothing);
+      expect(find.byKey(const Key('edit-tags--user-a')), findsNothing);
       expect(find.byTooltip('Edit tags'), findsOneWidget);
-      await _open(tester, 'user-same', domain: 'north');
+      await _open(tester, 'user-a', domain: 'north');
       expect(_chips(tester), ['north-tag']);
       await _type(tester, 'gamma');
       await _save(tester);
-      expect(server.docs['user-same']!['tags'], ['north-tag', 'gamma']);
+      expect(server.docs['user-a']!['tags'], ['north-tag', 'gamma']);
       expect(server.elsewhere.single['tags'], ['default-tag']);
       await _unmount(tester);
     });
