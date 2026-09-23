@@ -329,6 +329,24 @@ void main() {
       await _unmount(tester);
     });
 
+    testWidgets('a filter after the create starts again at the first page',
+        (tester) async {
+      final data = await _pump(tester, rows: _manyRows());
+      data.client.appendCreated = true;
+      await _createNewUser(tester);
+      expect(find.text('101–121 of 121'), findsOneWidget);
+
+      // Nine matches: without the reset the table would open at row 101,
+      // past the end, and show an empty page.
+      await tester.enterText(find.byType(TextField).first, 'user-00');
+      await tester.pumpAndSettle();
+      expect(find.text('Showing 9 of 121 users'), findsOneWidget);
+      expect(find.text('1–9 of 9'), findsOneWidget);
+      _expectOnScreen(tester, 'user-001');
+      _expectOnScreen(tester, 'user-009');
+      await _unmount(tester);
+    });
+
     testWidgets('a later reload keeps the page the admin is on',
         (tester) async {
       await _pump(tester, rows: _manyRows());
