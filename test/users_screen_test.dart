@@ -32,14 +32,27 @@ class _FakeResponse implements http_api.Response {
 /// listUserActivity answers with [activity] once [activityGate] (if any)
 /// completes, fails with [activityStatus] when that is not 200, and is a
 /// 404 — a server before tercen/sci#1667 — when [activity] is null.
+/// With [holdActivity], each listUserActivity call is instead held in
+/// [held] until the test answers that one call ([answerHeld], [failHeld]).
 class _ReportClient implements http_api.HttpClient {
   final Map<String, Object?> report;
   final List<String> calls = [];
   Map<String, Object?>? activity;
   int activityStatus = 200;
   Future<void>? activityGate;
+  bool holdActivity = false;
+  final List<Completer<http_api.Response>> held = [];
   final List<Map<String, Object?>> activityParams = [];
   _ReportClient(this.report);
+
+  /// Answers held call [i] with [activity].
+  void answerHeld(int i, Map<String, Object?> activity) => held[i].complete(
+      _FakeResponse(ContentCodec.tson().encode([json.encode(activity)])));
+
+  /// Fails held call [i] as a server error would.
+  void failHeld(int i) => held[i].complete(_FakeResponse(
+      ContentCodec.tson().encode({'error': 'admin.invented', 'reason': 'invented'}),
+      statusCode: 500));
 
   @override
   Future<http_api.Response> post(url,
@@ -65,6 +78,11 @@ class _ReportClient implements http_api.HttpClient {
     }
     if (endpoint == 'listUserActivity') {
       activityParams.add(Map<String, Object?>.from(codec.decode(body) as Map));
+      if (holdActivity) {
+        final call = Completer<http_api.Response>();
+        held.add(call);
+        return call.future;
+      }
       await activityGate;
       final activity = this.activity;
       if (activity == null) return _FakeResponse('', statusCode: 404);
@@ -113,34 +131,42 @@ List<Map<String, Object?>> _rows(int count) => [
 
 /// The Users page over a server that answers [report], and [activity]
 /// for listUserActivity (none: the route is missing). With a [gate] the
-/// activity waits for it, and the page is pumped, not settled: its
-/// loading spinner never settles.
+/// activity waits for it, and with [hold] each call waits for the test to
+/// answer it; either way the page is pumped, not settled: its loading
+/// spinner never settles.
 Future<_ReportData> _pump(
   WidgetTester tester,
   Map<String, Object?> report, {
   Map<String, Object?>? activity,
   int activityStatus = 200,
   Future<void>? gate,
+  bool hold = false,
   ActivityWindow window = const ActivityWindow.allTime(),
 }) async {
   final data = _ReportData(report);
   data.client
     ..activity = activity
     ..activityStatus = activityStatus
-    ..activityGate = gate;
+    ..activityGate = gate
+    ..holdActivity = hold;
   tester.view
     ..physicalSize = const Size(1280, 1600)
     ..devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(_app(data, window));
-  if (gate == null) {
+  if (gate == null && !hold) {
     await tester.pumpAndSettle();
   } else {
-    for (var i = 0; i < 5; i++) {
-      await tester.pump(const Duration(milliseconds: 50));
-    }
+    await _pumpFrames(tester);
   }
   return data;
+}
+
+/// A few frames, for a page whose loading spinner never settles.
+Future<void> _pumpFrames(WidgetTester tester) async {
+  for (var i = 0; i < 5; i++) {
+    await tester.pump(const Duration(milliseconds: 50));
+  }
 }
 
 Widget _app(DashboardData data, ActivityWindow window) => MaterialApp(
@@ -867,6 +893,82 @@ void main() {
       ]);
       expect(_rowTexts(tester, 'user-a').sublist(6, 8), ['40', '7']);
       await _unmount(tester);
+    });
+
+    /// [_activity] for all time, but with user-a on 111 active days: a
+    /// value only the first, superseded request carries.
+    Map<String, Object?> staleActivity() {
+      final activity = _activity();
+      ((activity['rows'] as List).first as Map<String, Object?>)['activeDays'] =
+          111;
+      return activity;
+    }
+
+    /// The page asks for all time (request 0, held), then moves to a
+    /// window (request 1, held); request 1 answers first.
+    Future<_ReportData> supersede(WidgetTester tester) async {
+      final data = await _pump(tester, _w3Report(), hold: true);
+      await tester.pumpWidget(
+          _app(data, const ActivityWindow('2026-09-01', '2026-09-30')));
+      await _pumpFrames(tester);
+      expect(data.client.held, hasLength(2));
+      data.client
+          .answerHeld(1, _activity(window: ('2026-09-01', '2026-09-30')));
+      await tester.pumpAndSettle();
+      expect(_rowTexts(tester, 'user-a').sublist(6, 9), ['40', '7', '4']);
+      return data;
+    }
+
+    testWidgets('a late answer to a superseded window is dropped',
+        (tester) async {
+      final data = await supersede(tester);
+
+      data.client.answerHeld(0, staleActivity());
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      // The window's values stay; the old request's never show.
+      expect(_rowTexts(tester, 'user-a').sublist(6, 9), ['40', '7', '4']);
+      expect(find.text('111'), findsNothing);
+      expect(find.byKey(const Key('activity-status')), findsNothing);
+      await _unmount(tester);
+    });
+
+    testWidgets('a late failure of a superseded window is dropped',
+        (tester) async {
+      final data = await supersede(tester);
+
+      data.client.failHeld(0);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      // No error icon in the cells and no error line over the values.
+      expect(find.byKey(const Key('activity-error')), findsNothing);
+      expect(find.byKey(const Key('activity-status')), findsNothing);
+      expect(find.text('Retry'), findsNothing);
+      expect(_rowTexts(tester, 'user-a').sublist(6, 9), ['40', '7', '4']);
+      await _unmount(tester);
+    });
+
+    /// Mounts the page with its request held, unmounts it, then lets
+    /// [answer] complete the request.
+    Future<void> answerAfterUnmount(
+        WidgetTester tester, void Function(_ReportClient) answer) async {
+      final data = await _pump(tester, _w3Report(), hold: true);
+      expect(data.client.held, hasLength(1));
+      await _unmount(tester);
+      answer(data.client);
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('a value after the page is gone is dropped quietly',
+        (tester) async {
+      await answerAfterUnmount(tester, (c) => c.answerHeld(0, _activity()));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('an error after the page is gone is dropped quietly',
+        (tester) async {
+      await answerAfterUnmount(tester, (c) => c.failHeld(0));
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('an error shows in the cells, the table works, retry loads',
