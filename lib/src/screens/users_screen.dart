@@ -116,7 +116,7 @@ class _ProjectsOwned extends StatelessWidget {
 /// A read-only tag: outlined, so it does not read as a role chip. Never
 /// wider than [maxWidth]: a longer tag is cut with an ellipsis.
 class _TagChip extends StatelessWidget {
-  static const maxWidth = 96.0;
+  static const maxWidth = 80.0;
   final String tag;
   const _TagChip(this.tag, {super.key});
 
@@ -126,7 +126,7 @@ class _TagChip extends StatelessWidget {
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: maxWidth),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
         decoration: BoxDecoration(
           border: Border.all(color: fg.withValues(alpha: 0.6)),
           borderRadius: BorderRadius.circular(999),
@@ -143,8 +143,10 @@ class _TagChip extends StatelessWidget {
 
 /// The Tags cell, bounded whatever the server sends: the first [shown] tags
 /// as chips, then "+N" for the rest. The full list is the cell's tooltip.
+/// Two chips of 80 px keep a row with every role and a four-digit "+N"
+/// inside a 1280 px screen (see the worst-case golden and its edge test).
 class _Tags extends StatelessWidget {
-  static const shown = 3;
+  static const shown = 2;
   final List<String> tags;
   const _Tags(this.tags);
 
@@ -160,6 +162,27 @@ class _Tags extends StatelessWidget {
         for (final tag in tags.take(shown)) _TagChip(tag),
         if (hidden > 0) _TagChip('+$hidden', key: const Key('tags-more')),
       ]),
+    );
+  }
+}
+
+/// Material draws no scrollbar on a horizontal scroll view, so a table wider
+/// than the card would hide its last columns without a sign. This one shows
+/// the horizontal thumb whenever there is something to scroll to: under the
+/// rows, and under the pager if the pager is ever wider than the card.
+class _HorizontalScrollbar extends MaterialScrollBehavior {
+  const _HorizontalScrollbar();
+
+  @override
+  Widget buildScrollbar(
+      BuildContext context, Widget child, ScrollableDetails details) {
+    if (axisDirectionToAxis(details.direction) != Axis.horizontal) {
+      return super.buildScrollbar(context, child, details);
+    }
+    return Scrollbar(
+      controller: details.controller,
+      thumbVisibility: true,
+      child: child,
     );
   }
 }
@@ -240,12 +263,11 @@ class _UsersScreenState extends State<UsersScreen> {
       DataCell(Text(user.name,
           key: user.name == _revealedName ? _revealKey : null)),
       DataCell(Text(user.email)),
-      DataCell(Row(children: [
-        Wrap(spacing: 4, children: [
-          for (final role in user.roles)
-            if (role != 'user') StateChip(role),
-        ]),
-        const SizedBox(width: 4),
+      // A Row, not a Wrap: a Wrap in a Row leaves its gaps out of the
+      // column's width, and three roles overflowed the cell.
+      DataCell(Row(spacing: 4, children: [
+        for (final role in user.roles)
+          if (role != 'user') StateChip(role),
         _RoleMenu(
           roles: user.roles,
           onChange: (role, grant) =>
@@ -369,42 +391,49 @@ class _UsersScreenState extends State<UsersScreen> {
                         ?.copyWith(letterSpacing: 0.6),
                   ),
                 ),
-                child: PaginatedDataTable(
-                  // A new filter starts again at the first page; a created
-                  // user opens it at theirs.
-                  key: ValueKey((_filter, _revealed)),
-                  initialFirstRowIndex: _firstRow,
-                  // The table keeps a full page of height below the last
-                  // row, so a list that fits on one page gets a page of its
-                  // own size: the pager then sits under the rows, not a
-                  // screen below them.
-                  rowsPerPage: onePage ? visible.length : _rowsPerPage,
-                  availableRowsPerPage: _pageSizes,
-                  onRowsPerPageChanged: onePage
-                      ? null
-                      : (value) {
-                          if (value != null) {
-                            setState(() => _rowsPerPage = value);
-                          }
-                        },
-                  showEmptyRows: false,
-                  showFirstLastButtons: true,
-                  // Eight columns: at the default spacing the last ones fall
-                  // off a laptop-width screen.
-                  columnSpacing: 28,
-                  columns: const [
-                    DataColumn(label: Text('NAME')),
-                    DataColumn(label: Text('EMAIL')),
-                    DataColumn(label: Text('ROLES')),
-                    DataColumn(label: Text('VALIDATED')),
-                    DataColumn(label: Text('DOMAIN')),
-                    DataColumn(label: Text('CREATED')),
-                    DataColumn(
-                        label: Text('PROJECTS OWNED'), numeric: true),
-                    DataColumn(label: Text('TAGS')),
-                  ],
-                  source: _UserRows(
-                      visible, (user) => _userRow(context, user, refresh)),
+                child: ScrollConfiguration(
+                  behavior: const _HorizontalScrollbar(),
+                  child: PaginatedDataTable(
+                    // A new filter starts again at the first page; a created
+                    // user opens it at theirs.
+                    key: ValueKey((_filter, _revealed)),
+                    initialFirstRowIndex: _firstRow,
+                    // The table keeps a full page of height below the last
+                    // row, so a list that fits on one page gets a page of its
+                    // own size: the pager then sits under the rows, not a
+                    // screen below them.
+                    rowsPerPage: onePage ? visible.length : _rowsPerPage,
+                    availableRowsPerPage: _pageSizes,
+                    onRowsPerPageChanged: onePage
+                        ? null
+                        : (value) {
+                            if (value != null) {
+                              setState(() => _rowsPerPage = value);
+                            }
+                          },
+                    showEmptyRows: false,
+                    showFirstLastButtons: true,
+                    // Eight columns: at the default spacing the last ones fall
+                    // off a laptop-width screen.
+                    columnSpacing: 20,
+                    columns: const [
+                      DataColumn(label: Text('NAME')),
+                      DataColumn(label: Text('EMAIL')),
+                      DataColumn(label: Text('ROLES')),
+                      DataColumn(label: Text('VALIDATED')),
+                      DataColumn(label: Text('DOMAIN')),
+                      DataColumn(label: Text('CREATED')),
+                      // On two lines: on one, the heading is three times
+                      // as wide as a four-digit count.
+                      DataColumn(
+                          label: Text('PROJECTS\nOWNED',
+                              textAlign: TextAlign.end),
+                          numeric: true),
+                      DataColumn(label: Text('TAGS')),
+                    ],
+                    source: _UserRows(
+                        visible, (user) => _userRow(context, user, refresh)),
+                  ),
                 ),
               ),
             ],

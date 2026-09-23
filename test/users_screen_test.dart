@@ -168,7 +168,7 @@ void main() {
         'VALIDATED',
         'DOMAIN',
         'CREATED',
-        'PROJECTS OWNED',
+        'PROJECTS\nOWNED',
         'TAGS',
       ]) {
         expect(find.text(column), findsOneWidget);
@@ -326,7 +326,7 @@ void main() {
       expect(find.text('—'), findsOneWidget);
 
       // Every column is there; the ones this server cannot fill are blank.
-      for (final column in ['ROLES', 'PROJECTS OWNED', 'TAGS']) {
+      for (final column in ['ROLES', 'PROJECTS\nOWNED', 'TAGS']) {
         expect(find.text(column), findsOneWidget);
       }
       expect(find.byTooltip('Change roles'), findsNWidgets(12));
@@ -450,14 +450,14 @@ void main() {
     });
 
     // Unbounded, 30 tags or one 300-character tag made the table several
-    // thousand pixels wide. Bounded, it is at most one Tags cell (three
+    // thousand pixels wide. Bounded, it is at most one Tags cell (two
     // chips and a "+N") wider than the same table with no tags at all.
     for (final (label, tags) in [
       ('30 tags', [for (var i = 1; i <= 30; i++) 'tag-$i']),
       ('one 300-character tag', ['x' * 300]),
     ]) {
       testWidgets('$label keep the table width bounded', (tester) async {
-        const maxCell = 4 * 96.0 + 3 * 4;
+        const maxCell = 3 * 80.0 + 2 * 4;
         final untagged = [
           for (final row in _w3Rows()) {...row, 'tags': <String>[]},
         ];
@@ -474,20 +474,20 @@ void main() {
         expect(tester.takeException(), isNull);
         expect(tester.getSize(find.byType(DataTable)).width,
             lessThanOrEqualTo(base + maxCell));
-        // The cell: at most three chips and a "+N", each chip bounded.
+        // The cell: at most two chips and a "+N", each chip bounded.
         final cell = find.ancestor(
             of: find.text(tags.first), matching: find.byType(Tooltip));
         expect(tester.getSize(cell).width, lessThanOrEqualTo(maxCell));
-        for (final tag in tags.take(3)) {
-          expect(tester.getSize(find.text(tag)).width, lessThan(96));
+        for (final tag in tags.take(2)) {
+          expect(tester.getSize(find.text(tag)).width, lessThan(80));
         }
-        if (tags.length > 3) {
-          expect(find.text('tag-4'), findsNothing);
+        if (tags.length > 2) {
+          expect(find.text('tag-3'), findsNothing);
           expect(
               tester.widget<Text>(find.descendant(
                   of: find.byKey(const Key('tags-more')),
                   matching: find.byType(Text))).data,
-              '+27');
+              '+28');
         } else {
           expect(find.byKey(const Key('tags-more')), findsNothing);
         }

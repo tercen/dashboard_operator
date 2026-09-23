@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sci_http_client/error.dart';
@@ -13,9 +14,10 @@ import '../support/fake_data.dart';
 
 /// Every screen, in both themes, on invented data (test/support), plus the
 /// narrow layout with its drawer open, the "Not authorized" page, the
-/// manager's shell, the Users table paged, truncated and with many or very
-/// long tags, and the Create user dialog filled in and refused. The PNGs under test/goldens/ are what the
-/// Tercen colour scheme looks like; update them with
+/// manager's shell, the Users table paged, truncated, with many or very
+/// long tags and with its widest row, and the Create user dialog filled in
+/// and refused. The PNGs under test/goldens/ are what the Tercen colour
+/// scheme looks like; update them with
 /// `flutter test --update-goldens test/goldens`.
 void main() {
   setUpAll(_loadFonts);
@@ -89,7 +91,7 @@ void main() {
     });
 
     // A user with 30 tags, and one with a single 300-character tag: the
-    // Tags cell stays bounded — three chips and "+N", each chip cut with an
+    // Tags cell stays bounded — two chips and "+N", each chip cut with an
     // ellipsis — and the table does not grow past the screen.
     for (final (state, tags) in [
       ('many', [for (var i = 1; i <= 30; i++) 'tag-$i']),
@@ -108,6 +110,20 @@ void main() {
         await _unmount(tester);
       });
     }
+
+    // The widest row the fixtures allow, at 1280 px with the bundled fonts:
+    // every role, a four-digit count, two full tag chips and "+998". It
+    // all fits inside the card; the edge test below measures it.
+    testWidgets('Users, worst-case row, $name theme', (tester) async {
+      await _pumpApp(tester, mode, fakeAdminSession(),
+          data: TaggedUsersData.worstCase());
+      await _openUsers(tester);
+
+      expect(find.text('+998'), findsOneWidget);
+      _expectSelected(tester, sections.indexOf('Users'));
+      await _expectGolden('users_worst_case_$name.png');
+      await _unmount(tester);
+    });
 
     // The Create user dialog, filled in with an invented user, and the same
     // dialog after the server refused it: the error shown, the input kept.
@@ -176,7 +192,89 @@ void main() {
       await _unmount(tester);
     });
   }
+
+  // The edge of the worst case: at 1280 px with the bundled fonts, the
+  // widest row the fixtures allow fits inside the card. Nothing overflows,
+  // there is nothing to scroll to, and the "+N" chip — the last thing in
+  // the row — ends inside the card and the screen.
+  testWidgets('Users, worst-case row fits at 1280 px', (tester) async {
+    await _pumpApp(tester, ThemeMode.light, fakeAdminSession(),
+        data: TaggedUsersData.worstCase());
+    await _openUsers(tester);
+
+    expect(tester.takeException(), isNull);
+    expect(tester.view.physicalSize.width, 1280);
+    final card = tester.getRect(find.byType(PaginatedDataTable));
+    expect(card.right, lessThanOrEqualTo(1280));
+    expect(tester.getRect(find.byType(DataTable)).right,
+        lessThanOrEqualTo(card.right));
+    // The table's own width, before the card stretches it: at least 16 px
+    // to spare, so the fit is not a matter of a fraction of a pixel.
+    final table = tester.renderObject<RenderBox>(find.descendant(
+        of: find.byType(DataTable), matching: find.byType(Table)));
+    expect(table.getMaxIntrinsicWidth(double.infinity),
+        lessThanOrEqualTo(card.width - 16));
+    expect(_tableScroll(tester).maxScrollExtent, 0);
+
+    final more = tester.getRect(find.byKey(const Key('tags-more')));
+    expect(tester.widget<Text>(find.descendant(
+            of: find.byKey(const Key('tags-more')),
+            matching: find.byType(Text))).data,
+        '+998');
+    expect(more.right, lessThanOrEqualTo(card.right));
+    // Every text in the table, the "+N" label included, is laid out whole:
+    // no text is cut by its cell.
+    for (final element in find
+        .descendant(of: find.byType(DataTable), matching: find.byType(Text))
+        .evaluate()) {
+      final text = element.widget as Text;
+      final paragraph = element.renderObject as RenderParagraph?;
+      final label = text.data ?? '';
+      if (paragraph == null || label.startsWith('W')) continue;
+      expect(paragraph.didExceedMaxLines, isFalse, reason: label);
+      expect(paragraph.size.width,
+          greaterThanOrEqualTo(paragraph.getMaxIntrinsicWidth(0) - 0.5),
+          reason: label);
+      expect(tester.getRect(find.byWidget(text)).right,
+          lessThanOrEqualTo(card.right),
+          reason: label);
+    }
+    await _unmount(tester);
+  });
+
+  // A row wider than the card — here a longer email than any fixture's —
+  // is not cut off without a sign: the table scrolls, and its horizontal
+  // scrollbar is on screen.
+  testWidgets('Users, a row wider than the card shows a scrollbar',
+      (tester) async {
+    await _pumpApp(tester, ThemeMode.light, fakeAdminSession(),
+        data: TaggedUsersData.worstCase(
+            name: 'a-much-longer-invented-name-than-the-card-has-room-for'));
+    await _openUsers(tester);
+
+    expect(tester.takeException(), isNull);
+    expect(_tableScroll(tester).maxScrollExtent, greaterThan(0));
+    final scrollbar = tester.widget<Scrollbar>(find
+        .ancestor(of: find.byType(DataTable), matching: find.byType(Scrollbar))
+        .first);
+    expect(scrollbar.thumbVisibility, isTrue);
+    await _unmount(tester);
+  });
 }
+
+/// Opens the Users screen from the rail and lets it settle.
+Future<void> _openUsers(WidgetTester tester) async {
+  await tester.tap(find.descendant(
+      of: find.byType(NavigationRail), matching: find.text('Users')));
+  await tester.pumpAndSettle();
+}
+
+/// The horizontal scroll view that holds the Users table.
+ScrollPosition _tableScroll(WidgetTester tester) => tester
+    .state<ScrollableState>(find
+        .ancestor(of: find.byType(DataTable), matching: find.byType(Scrollable))
+        .first)
+    .position;
 
 /// [FakeDashboardData] whose server refuses every new user, with an
 /// invented reason.

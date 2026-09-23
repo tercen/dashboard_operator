@@ -378,9 +378,41 @@ class ManyUsersData extends FakeDashboardData {
 
 /// [FakeDashboardData] with one more user, `tagged`, whose tags are [tags]:
 /// many tags, or one very long one, to show the Tags cell stays bounded.
+/// [name], [roles], [domain], [validated] and [owned] make the rest of that
+/// row as wide as the test needs.
 class TaggedUsersData extends FakeDashboardData {
   final List<String> tags;
-  TaggedUsersData(this.tags);
+  final String name;
+  final List<String> roles;
+  final String domain;
+  final bool validated;
+  final int owned;
+  TaggedUsersData(
+    this.tags, {
+    this.name = 'tagged',
+    this.roles = const ['user'],
+    this.domain = '',
+    this.validated = true,
+    this.owned = 2,
+  });
+
+  /// The widest row the fixtures allow: a name and email longer than any
+  /// other fixture's, every grantable role, not validated, a domain, a
+  /// four-digit project count, and a thousand tags whose first ones fill a
+  /// chip, so the "+N" chip is four characters wide too. A longer [name]
+  /// makes a row wider than that.
+  TaggedUsersData.worstCase({String name = 'worst-case'})
+      : this(
+          [
+            for (var i = 1; i <= 3; i++) 'W' * 40,
+            for (var i = 4; i <= 1000; i++) 'tag-$i',
+          ],
+          name: name,
+          roles: const ['user', 'manager', 'operator', 'admin'],
+          domain: 'north',
+          validated: false,
+          owned: 1234,
+        );
 
   @override
   Future<UserListing> users({int limit = UserRows.serverMaxLimit}) async {
@@ -393,15 +425,15 @@ class TaggedUsersData extends FakeDashboardData {
       users: [
         ...listing.users,
         DashboardUser(
-          id: 'user-tagged',
-          name: 'tagged',
-          email: 'tagged@example.test',
-          domain: '',
-          roles: const ['user'],
-          isValidated: true,
+          id: 'user-$name',
+          name: name,
+          email: '$name@example.test',
+          domain: domain,
+          roles: roles,
+          isValidated: validated,
           createdDate: '2026-09-21T09:00:00',
           tags: tags,
-          projectsOwned: 2,
+          projectsOwned: owned,
           projectsOwnedReported: true,
         ),
       ],
