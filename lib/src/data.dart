@@ -7,6 +7,7 @@ import 'admin_api.dart';
 import 'session.dart';
 import 'usage.dart';
 import 'user_activity.dart';
+import 'user_filters.dart';
 
 /// Data access for the dashboard panels, on top of the existing API surface.
 /// Server-side authorization is the boundary: every call here is made with the
@@ -16,7 +17,13 @@ class DashboardData {
   late final AdminApi adminApi =
       AdminApi(session.serviceBase, session.httpClient);
 
-  DashboardData(this.session);
+  /// Where per-browser choices are kept (the Users page's filters).
+  final Settings settings;
+
+  DashboardData(this.session, {this.settings = const BrowserSettings()});
+
+  /// The time the MAU preset counts back from. Tests fix it.
+  DateTime now() => DateTime.now();
 
   sci.ServiceFactory get _f => session.factory;
 
