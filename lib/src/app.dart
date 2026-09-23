@@ -81,15 +81,21 @@ class _RoleGate extends StatelessWidget {
 class DashboardShell extends StatefulWidget {
   final DashboardSession session;
   final ThemeController theme;
+
+  /// Data source for the panels; defaults to the live API over [session].
+  /// Tests pass invented data here.
+  final DashboardData? data;
+
   const DashboardShell(
-      {super.key, required this.session, required this.theme});
+      {super.key, required this.session, required this.theme, this.data});
 
   @override
   State<DashboardShell> createState() => _DashboardShellState();
 }
 
 class _DashboardShellState extends State<DashboardShell> {
-  late final DashboardData _data = DashboardData(widget.session);
+  late final DashboardData _data =
+      widget.data ?? DashboardData(widget.session);
   int _index = 0;
   bool _restoredFromUrl = false;
 

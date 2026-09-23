@@ -72,8 +72,7 @@ class SettingsScreen extends StatelessWidget {
                 'allowlist, so a newly added key is withheld by default.',
                 style: Theme.of(context)
                     .textTheme
-                    .bodySmall
-                    ?.copyWith(color: Theme.of(context).colorScheme.outline),
+                    .bodySmall,
               ),
               const SizedBox(height: 8),
               _Table(values: snap.config),
