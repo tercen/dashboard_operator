@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sci_http_client/error.dart';
 
 import 'package:tercen_dashboard/src/app.dart';
 import 'package:tercen_dashboard/src/session.dart';
@@ -12,9 +13,10 @@ import '../support/fake_data.dart';
 
 /// Every screen, in both themes, on invented data (test/support), plus the
 /// narrow layout with its drawer open, the "Not authorized" page, the
-/// manager's shell, and the Users table paged and truncated. The PNGs
-/// under test/goldens/ are what the Tercen colour scheme looks like; update
-/// them with `flutter test --update-goldens test/goldens`.
+/// manager's shell, the Users table paged and truncated, and the Create user
+/// dialog filled in and refused. The PNGs under test/goldens/ are what the
+/// Tercen colour scheme looks like; update them with
+/// `flutter test --update-goldens test/goldens`.
 void main() {
   setUpAll(_loadFonts);
 
@@ -86,6 +88,39 @@ void main() {
       await _unmount(tester);
     });
 
+    // The Create user dialog, filled in with an invented user, and the same
+    // dialog after the server refused it: the error shown, the input kept.
+    for (final (state, data) in [
+      ('filled', FakeDashboardData()),
+      ('refused', _RefusingData()),
+    ]) {
+      testWidgets('Create user dialog, $state, $name theme', (tester) async {
+        await _pumpApp(tester, mode, fakeAdminSession(), data: data);
+        await tester.tap(find.descendant(
+            of: find.byType(NavigationRail), matching: find.text('Users')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Create user'));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+            find.byKey(const Key('create-user-name')), 'new-user');
+        await tester.enterText(find.byKey(const Key('create-user-email')),
+            'new.user@example.test');
+        await tester.enterText(
+            find.byKey(const Key('create-user-password')), 'invented');
+        if (state == 'refused') {
+          await tester.tap(find.widgetWithText(FilledButton, 'Create'));
+        }
+        // The caret blinks; settle on a fixed frame without the focus.
+        FocusManager.instance.primaryFocus?.unfocus();
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('create-user-error')),
+            state == 'refused' ? findsOneWidget : findsNothing);
+        await _expectGolden('create_user_${state}_$name.png');
+        await _unmount(tester);
+      });
+    }
+
     testWidgets('narrow layout, drawer open, $name theme', (tester) async {
       await _pumpApp(tester, mode, fakeAdminSession(),
           size: const Size(390, 844));
@@ -120,6 +155,18 @@ void main() {
       await _unmount(tester);
     });
   }
+}
+
+/// [FakeDashboardData] whose server refuses every new user, with an
+/// invented reason.
+class _RefusingData extends FakeDashboardData {
+  @override
+  Future<void> createUser(
+          {required String name,
+          required String email,
+          required String password}) async =>
+      throw ServiceError(400, 'user.create.username.not.available',
+          'Username "$name" is not available.');
 }
 
 /// The real app below the session: [RoleGate] picks the shell or the
