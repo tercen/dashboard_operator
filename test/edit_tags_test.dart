@@ -234,6 +234,17 @@ Map<String, Object?> _posted(_UserServer server) {
       _codec.decode(server.postedBodies.single) as Map);
 }
 
+/// [tag]'s chip is in [name]'s Name cell: on its line, after the name and
+/// before the Email cell.
+void _expectAfterName(WidgetTester tester, String name, String tag) {
+  final nameRect = tester.getRect(find.text(name).first);
+  final chip = tester.getRect(find.text(tag).first);
+  final email = tester.getRect(find.text('$name@example.test').first);
+  expect((chip.center.dy - nameRect.center.dy).abs(), lessThan(4));
+  expect(chip.left, greaterThan(nameRect.right));
+  expect(chip.right, lessThan(email.left));
+}
+
 /// The panel refreshes on a timer; unmount so it does not outlive the test.
 Future<void> _unmount(WidgetTester tester) =>
     tester.pumpWidget(const SizedBox());
@@ -310,8 +321,9 @@ void main() {
     });
   });
 
-  group('the Tags cell editor', () {
-    testWidgets('add: the tag is saved and the list reloads', (tester) async {
+  group('the tag editor', () {
+    testWidgets('add: the tag is saved and shown, the list not read again',
+        (tester) async {
       final server = await _pump(tester, [_storedDoc()]);
       expect(server.calls.where((c) => c == 'listUsers'), hasLength(1));
 
@@ -327,10 +339,111 @@ void main() {
       expect(sent['rev'], '7-aaaa');
       expect(find.byType(EditTagsDialog), findsNothing);
       expect(find.text('Saved the tags of user-a'), findsOneWidget);
-      // The list is read again, and shows the new tag (the cell's tooltip
-      // holds the full list).
-      expect(server.calls.where((c) => c == 'listUsers'), hasLength(2));
+      // The row shows the tags as saved at once (the chips' tooltip holds
+      // the full list), without reading the list again.
+      expect(server.calls.where((c) => c == 'listUsers'), hasLength(1));
       expect(find.byTooltip('pilot, beta, gamma'), findsOneWidget);
+      await _unmount(tester);
+    });
+
+    // A tag typed and then saved, without Add or Enter, was dropped: Save
+    // saw no change and closed. Save now adds it first.
+    testWidgets('a tag typed, then Save: it is stored and shown in the row',
+        (tester) async {
+      final server = await _pump(tester, [_storedDoc()]);
+
+      await _open(tester, 'user-a');
+      await tester.enterText(find.byKey(const Key('edit-tags-field')), 'gamma');
+      await _save(tester);
+
+      // The raw PUT body carries it, and nothing else changed.
+      final sent = _posted(server);
+      expect(sent, {..._storedDoc(), 'tags': ['pilot', 'beta', 'gamma']});
+      expect(server.docs['user-a']!['tags'], ['pilot', 'beta', 'gamma']);
+      expect(find.byType(EditTagsDialog), findsNothing);
+      expect(find.text('Saved the tags of user-a'), findsOneWidget);
+      // Shown in the row at once: the third tag is behind "+1".
+      expect(find.byTooltip('pilot, beta, gamma'), findsOneWidget);
+      expect(find.text('+1'), findsOneWidget);
+      expect(server.calls.where((c) => c == 'listUsers'), hasLength(1));
+      await _unmount(tester);
+    });
+
+    testWidgets('the next list the page loads replaces the tags shown',
+        (tester) async {
+      final server = await _pump(tester, [_storedDoc()]);
+      await _open(tester, 'user-a');
+      await tester.enterText(find.byKey(const Key('edit-tags-field')), 'gamma');
+      await _save(tester);
+      expect(find.byTooltip('pilot, beta, gamma'), findsOneWidget);
+
+      // Someone else changes the tags; a refresh shows the server's.
+      server.docs['user-a'] = _storedDoc(rev: '9-dddd', tags: ['theirs']);
+      await tester.tap(find.byTooltip('Refresh'));
+      await tester.pumpAndSettle();
+      expect(server.calls.where((c) => c == 'listUsers'), hasLength(2));
+      expect(find.byTooltip('pilot, beta, gamma'), findsNothing);
+      expect(find.byTooltip('theirs'), findsOneWidget);
+      await _unmount(tester);
+    });
+
+    testWidgets('a typed tag Add would refuse keeps the dialog open',
+        (tester) async {
+      final server = await _pump(tester, [_storedDoc()]);
+
+      await _open(tester, 'user-a');
+      await tester.enterText(find.byKey(const Key('edit-tags-field')), ' beta ');
+      await _save(tester);
+      expect(find.byType(EditTagsDialog), findsOneWidget);
+      expect(find.text('"beta" is already a tag'), findsOneWidget);
+
+      // Blank but not empty is refused too; nothing is sent either time.
+      await tester.enterText(find.byKey(const Key('edit-tags-field')), '   ');
+      await _save(tester);
+      expect(find.byType(EditTagsDialog), findsOneWidget);
+      expect(find.text('A tag cannot be empty'), findsOneWidget);
+      expect(server.postedBodies, isEmpty);
+
+      // Fixed, it is saved.
+      await tester.enterText(find.byKey(const Key('edit-tags-field')), 'gamma');
+      await _save(tester);
+      expect(_posted(server)['tags'], ['pilot', 'beta', 'gamma']);
+      expect(find.byType(EditTagsDialog), findsNothing);
+      await _unmount(tester);
+    });
+
+    testWidgets('a typed tag is saved with the chips removed', (tester) async {
+      final server = await _pump(tester, [_storedDoc()]);
+
+      await _open(tester, 'user-a');
+      await tester.tap(find.byTooltip('Remove pilot'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('edit-tags-field')), 'gamma');
+      await _save(tester);
+
+      expect(_posted(server)['tags'], ['beta', 'gamma']);
+      expect(find.byTooltip('beta, gamma'), findsOneWidget);
+      await _unmount(tester);
+    });
+
+    testWidgets('a tag typed, then a conflict: nothing is saved twice',
+        (tester) async {
+      final server = await _pump(tester, [_storedDoc()]);
+
+      await _open(tester, 'user-a');
+      await tester.enterText(find.byKey(const Key('edit-tags-field')), 'gamma');
+      server.changeBeforeNextPost =
+          _storedDoc(rev: '8-cccc', tags: ['theirs']);
+      await _save(tester);
+
+      expect(server.calls.where((c) => c.startsWith('update')), hasLength(1));
+      expect(find.text(EditTagsDialog.conflictMessage), findsOneWidget);
+      expect(_chips(tester), ['theirs']);
+      expect(server.docs['user-a']!['tags'], ['theirs']);
+      // The row is not changed by a save that did not happen.
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('pilot, beta'), findsOneWidget);
       await _unmount(tester);
     });
 
@@ -383,6 +496,9 @@ void main() {
       await _type(tester, 'gamma');
       expect(find.text('"gamma" is already a tag'), findsOneWidget);
       expect(_chips(tester), ['pilot', 'beta', 'gamma']);
+      // The refused text is still in the field: cleared, Save does not
+      // try it again.
+      await tester.enterText(find.byKey(const Key('edit-tags-field')), '');
 
       // Removing the stored duplicate removes it wherever it is stored.
       await tester.tap(find.byTooltip('Remove pilot'));
@@ -535,8 +651,23 @@ void main() {
       expect(find.byTooltip('Edit tags'), findsNothing);
       expect(find.byType(IconButton).evaluate().where((e) =>
           (e.widget as IconButton).tooltip == 'Edit tags'), isEmpty);
-      // The tags are still shown, read-only.
+      // The tags are still shown, read-only, after each name.
       expect(find.byTooltip('pilot, beta'), findsNWidgets(2));
+      expect(find.text('pilot'), findsNWidgets(2));
+      _expectAfterName(tester, 'user-a', 'pilot');
+      await _unmount(tester);
+    });
+
+    testWidgets('the chips and the control sit after the name', (tester) async {
+      await _pump(tester, [_storedDoc()]);
+      expect(find.text('TAGS'), findsNothing);
+      _expectAfterName(tester, 'user-a', 'pilot');
+      _expectAfterName(tester, 'user-a', 'beta');
+      final button = tester.getRect(find.byKey(const Key('edit-tags--user-a')));
+      expect(button.left,
+          greaterThanOrEqualTo(tester.getRect(find.text('beta')).right));
+      expect(button.right,
+          lessThan(tester.getRect(find.text('user-a@example.test')).left));
       await _unmount(tester);
     });
   });

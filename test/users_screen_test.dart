@@ -384,10 +384,11 @@ void main() {
         'DOMAIN',
         'CREATED',
         'PROJECTS\nOWNED',
-        'TAGS',
       ]) {
         expect(find.text(column), findsOneWidget);
       }
+      // Tags show after the name, not in a column of their own.
+      expect(find.text('TAGS'), findsNothing);
 
       // First page: 50 rows; the 25 of the admin's own domain have the
       // role control.
@@ -542,7 +543,7 @@ void main() {
       expect(find.text('—'), findsOneWidget);
 
       // Every column is there; the ones this server cannot fill are blank.
-      for (final column in ['ROLES', 'PROJECTS\nOWNED', 'TAGS']) {
+      for (final column in ['ROLES', 'PROJECTS\nOWNED']) {
         expect(find.text(column), findsOneWidget);
       }
       expect(find.byTooltip('Change roles'), findsNWidgets(6));
@@ -579,14 +580,15 @@ void main() {
           {'rows': _w3Rows(), 'total': 3, 'truncated': false});
 
       expect(_banner(tester), 'Showing 3 of 3 users');
+      // The tags follow the name, in the Name cell.
       expect(_rowTexts(tester, 'user-a'), [
         'user-a',
+        'pilot',
+        'beta',
         'user-a@example.test',
         'default',
         '2026-09-01 12:00',
         '4',
-        'pilot',
-        'beta',
       ]);
       // Counted, none owned: 0. Empty tags: nothing.
       expect(_rowTexts(tester, 'user-b'), [
@@ -599,11 +601,11 @@ void main() {
       // Not counted: "unknown", not 0 and not blank.
       expect(_rowTexts(tester, 'user-c'), [
         'user-c',
+        'beta',
         'user-c@example.test',
         'north',
         '2026-09-01 12:00',
         'unknown',
-        'beta',
       ]);
       expect(find.text('null'), findsNothing);
 
@@ -659,7 +661,8 @@ void main() {
       rows[0]['tags'] = [null, 'pilot', 42];
       await _pump(tester, {'rows': rows, 'total': 3, 'truncated': false});
 
-      expect(_rowTexts(tester, 'user-a').skip(4), ['4', 'pilot']);
+      expect(_rowTexts(tester, 'user-a').take(2), ['user-a', 'pilot']);
+      expect(_rowTexts(tester, 'user-a').last, '4');
       expect(find.text('null'), findsNothing);
       expect(find.text('42'), findsNothing);
       await _unmount(tester);
@@ -714,12 +717,47 @@ void main() {
     }
   });
 
+  group('the name links to the user\'s page', () {
+    testWidgets('each name is a link to /<username> on the Tercen host',
+        (tester) async {
+      await _pump(tester, _w3Report());
+
+      final names = {
+        for (final link
+            in tester.widgetList<LinkText>(find.byType(LinkText)))
+          link.text: link.url,
+      };
+      expect(names, {
+        'user-a': 'https://tercen.example/user-a',
+        'user-b': 'https://tercen.example/user-b',
+        'user-c': 'https://tercen.example/user-c',
+      });
+      await _unmount(tester);
+    });
+
+    testWidgets('the username is encoded as the project and workflow links '
+        'encode their owner', (tester) async {
+      final rows = _w3Rows();
+      rows[0]['name'] = 'ana maría';
+      final data =
+          await _pump(tester, {'rows': rows, 'total': 3, 'truncated': false});
+
+      final link = tester.widget<LinkText>(find.ancestor(
+          of: find.text('ana maría'), matching: find.byType(LinkText)));
+      expect(link.url, 'https://tercen.example/ana%20mar%C3%ADa');
+      expect(data.projectUrl('ana maría', 'p1'), '${link.url}/p/p1');
+      expect(data.workflowUrl('ana maría', 'w1'), '${link.url}/w/w1');
+      await _unmount(tester);
+    });
+  });
+
   group('activity columns (tercen/sci#1667)', () {
-    /// The URL of every link in the table, top to bottom.
+    /// The URL of every activity link in the table, top to bottom: every
+    /// link but the names'.
     List<String> links(WidgetTester tester) => [
           for (final link
               in tester.widgetList<LinkText>(find.byType(LinkText)))
-            link.url,
+            if (link.url != 'https://tercen.example/${link.text}') link.url,
         ];
 
     testWidgets('the list shows at once; the activity cells load after it',
@@ -741,14 +779,14 @@ void main() {
           'Loading activity — the table can be used meanwhile');
       expect(_rowTexts(tester, 'user-a'), [
         'user-a',
+        'pilot',
+        'beta',
         'user-a@example.test',
         'default',
         '2026-09-01 12:00',
         '…',
         '…',
         '4',
-        'pilot',
-        'beta',
       ]);
 
       // The table is usable meanwhile: the filter narrows it, the role
@@ -772,6 +810,8 @@ void main() {
       expect(find.byKey(const Key('activity-status')), findsNothing);
       expect(_rowTexts(tester, 'user-a'), [
         'user-a',
+        'pilot',
+        'beta',
         'user-a@example.test',
         'default',
         '2026-09-01 12:00',
@@ -779,8 +819,6 @@ void main() {
         '+9',
         '40',
         '4',
-        'pilot',
-        'beta',
       ]);
       // All time: empty from and to, the server's default budget.
       expect(data.client.activityParams, [
@@ -806,6 +844,8 @@ void main() {
       expect(find.byKey(const Key('activity-expanded')), findsNothing);
       expect(find.text('Pilot'), findsNothing);
 
+      await tester.ensureVisible(find.byKey(const Key('activity-toggle')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('activity-toggle')));
       await tester.pumpAndSettle();
 
@@ -851,6 +891,8 @@ void main() {
               of: find.text('Old flow'), matching: find.byType(LinkText)),
           findsNothing);
 
+      await tester.ensureVisible(find.byKey(const Key('activity-toggle')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('activity-toggle')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('activity-expanded')), findsNothing);
@@ -878,6 +920,8 @@ void main() {
       ];
       await _pump(tester, {'rows': rows, 'total': 63, 'truncated': false},
           activity: _activity());
+      await tester.ensureVisible(find.byKey(const Key('activity-toggle')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('activity-toggle')));
       await tester.pumpAndSettle();
       await _nextPage(tester);
@@ -900,8 +944,8 @@ void main() {
       // Counted, nothing found: "none" and 0.
       expect(_rowTexts(tester, 'user-b').sublist(4), ['none', '0', '0']);
       // Not read: "unknown" in both cells, never 0 or blank.
-      expect(_rowTexts(tester, 'user-c').sublist(4),
-          ['unknown', 'unknown', 'unknown', 'beta']);
+      expect(_rowTexts(tester, 'user-c').sublist(5),
+          ['unknown', 'unknown', 'unknown']);
       final unknown = tester.widget<Text>(find.descendant(
           of: find.byKey(const Key('active-days-unknown')),
           matching: find.byType(Text)));
@@ -937,7 +981,7 @@ void main() {
       expect(find.byTooltip('Days with activity, 2026-08-01 – 2026-08-31 (UTC)'),
           findsOneWidget);
       // Truncated: "≥", with the reason on hover.
-      expect(_rowTexts(tester, 'user-a').sublist(5, 8), ['+9', '≥40', '≥7']);
+      expect(_rowTexts(tester, 'user-a').sublist(7, 10), ['+9', '≥40', '≥7']);
       expect(find.byTooltip(RegExp(r'^At least 40: ')), findsOneWidget);
       expect(find.byTooltip(RegExp(r'^At least 7: ')), findsOneWidget);
       // Not truncated: the plain count.
@@ -954,7 +998,7 @@ void main() {
         {'from': '', 'to': '', 'budget': 0},
         {'from': '2026-09-01', 'to': '2026-09-30', 'budget': 0},
       ]);
-      expect(_rowTexts(tester, 'user-a').sublist(6, 8), ['40', '7']);
+      expect(_rowTexts(tester, 'user-a').sublist(8, 10), ['40', '7']);
       await _unmount(tester);
     });
 
@@ -976,7 +1020,7 @@ void main() {
       data.client
           .answerHeld(1, _activity(window: ('2026-09-01', '2026-09-30')));
       await tester.pumpAndSettle();
-      expect(_rowTexts(tester, 'user-a').sublist(6, 9), ['40', '7', '4']);
+      expect(_rowTexts(tester, 'user-a').sublist(8, 11), ['40', '7', '4']);
       return data;
     }
 
@@ -988,7 +1032,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       // The window's values stay; the old request's never show.
-      expect(_rowTexts(tester, 'user-a').sublist(6, 9), ['40', '7', '4']);
+      expect(_rowTexts(tester, 'user-a').sublist(8, 11), ['40', '7', '4']);
       expect(find.text('111'), findsNothing);
       expect(find.byKey(const Key('activity-status')), findsNothing);
       await _unmount(tester);
@@ -1005,7 +1049,7 @@ void main() {
       expect(find.byKey(const Key('activity-error')), findsNothing);
       expect(find.byKey(const Key('activity-status')), findsNothing);
       expect(find.text('Retry'), findsNothing);
-      expect(_rowTexts(tester, 'user-a').sublist(6, 9), ['40', '7', '4']);
+      expect(_rowTexts(tester, 'user-a').sublist(8, 11), ['40', '7', '4']);
       await _unmount(tester);
     });
 
@@ -1041,12 +1085,12 @@ void main() {
       expect(_status(tester), startsWith('Activity could not be loaded: '));
       expect(_rowTexts(tester, 'user-a'), [
         'user-a',
+        'pilot',
+        'beta',
         'user-a@example.test',
         'default',
         '2026-09-01 12:00',
         '4',
-        'pilot',
-        'beta',
       ]);
       expect(find.byTooltip('Change roles'), findsOneWidget);
 
@@ -1054,7 +1098,7 @@ void main() {
       await tester.tap(find.text('Retry'));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('activity-error')), findsNothing);
-      expect(_rowTexts(tester, 'user-a').sublist(4, 7), ['Gating', '+9', '40']);
+      expect(_rowTexts(tester, 'user-a').sublist(6, 9), ['Gating', '+9', '40']);
       expect(data.client.activityParams, hasLength(2));
       await _unmount(tester);
     });
@@ -1072,12 +1116,12 @@ void main() {
       // Every other cell as before; the activity cells are empty.
       expect(_rowTexts(tester, 'user-a'), [
         'user-a',
+        'pilot',
+        'beta',
         'user-a@example.test',
         'default',
         '2026-09-01 12:00',
         '4',
-        'pilot',
-        'beta',
       ]);
       expect(find.byTooltip('Change roles'), findsOneWidget);
       await _unmount(tester);
