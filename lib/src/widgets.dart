@@ -353,3 +353,47 @@ bool isNarrowLayout(BuildContext context) {
   final width = MediaQuery.sizeOf(context).width;
   return width < 720 || (platform.isTouchDevice() && width < 1024);
 }
+
+/// Tercen's App icon (tercen-style icons/App.svg): a 4x4 grid of coloured
+/// squares, drawn natively so the app needs no SVG package. It keeps its
+/// own colours in both themes — no IconTheme, no tint.
+class TercenAppIcon extends StatelessWidget {
+  final double size;
+  const TercenAppIcon({super.key, this.size = 24});
+
+  /// The SVG's fills, row by row, left to right.
+  static const colors = <Color>[
+    Color(0xFFFF0000), Color(0xFFFF8200), Color(0xFF99FF00), Color(0xFFFFBF00),
+    Color(0xFF9333EA), Color(0xFF0099FF), Color(0xFF6D0000), Color(0xFF66FF7F),
+    Color(0xFFE040FB), Color(0xFF00FFFF), Color(0xFF0000FF), Color(0xFF0D9488),
+    Color(0xFFFF4F00), Color(0xFFEC4899), Color(0xFFFFF8DC), Color(0xFFFFDD00),
+  ];
+
+  @override
+  Widget build(BuildContext context) => CustomPaint(
+      size: Size.square(size), painter: const _AppIconPainter());
+}
+
+class _AppIconPainter extends CustomPainter {
+  const _AppIconPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // crispEdges: no anti-aliasing, and each cell edge is the next cell's
+    // edge, so no seam shows between squares.
+    final paint = Paint()..isAntiAlias = false;
+    double edge(double extent, int i) => (extent * i / 4).roundToDouble();
+    for (var row = 0; row < 4; row++) {
+      for (var col = 0; col < 4; col++) {
+        paint.color = TercenAppIcon.colors[row * 4 + col];
+        canvas.drawRect(
+            Rect.fromLTRB(edge(size.width, col), edge(size.height, row),
+                edge(size.width, col + 1), edge(size.height, row + 1)),
+            paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_AppIconPainter oldDelegate) => false;
+}

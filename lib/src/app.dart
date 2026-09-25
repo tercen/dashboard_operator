@@ -219,8 +219,7 @@ class _DashboardShellState extends State<DashboardShell> {
             child: ListView(
               children: [
                 ListTile(
-                  leading: Icon(Icons.hub,
-                      color: Theme.of(context).colorScheme.primary),
+                  leading: const TercenAppIcon(),
                   title: const Text('Tercen Dashboard'),
                   subtitle: Text(
                       '${widget.session.username}@${widget.session.domain.isEmpty ? "default" : widget.session.domain}'),
@@ -254,8 +253,7 @@ class _DashboardShellState extends State<DashboardShell> {
             leading: Padding(
               padding: const EdgeInsets.only(top: 8, bottom: 12),
               child: Column(children: [
-                Icon(Icons.hub,
-                    color: Theme.of(context).colorScheme.primary, size: 28),
+                const TercenAppIcon(size: 28),
                 const SizedBox(height: 4),
                 Text('Tercen',
                     style: Theme.of(context).textTheme.labelSmall),
