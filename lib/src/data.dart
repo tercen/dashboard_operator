@@ -188,6 +188,11 @@ class DashboardData {
   String projectUrl(String owner, String projectId) =>
       session.serviceBase.replace(path: '/$owner/p/$projectId').toString();
 
+  /// A user's home page in the web UI, built as the links above are: the
+  /// route is /:teamId, which users and teams share.
+  String userUrl(String username) =>
+      session.serviceBase.replace(path: '/$username').toString();
+
   /// Reads a task's stdout/stderr log file, capped so a runaway log cannot
   /// freeze the tab.
   Future<String> readLog(String fileDocumentId, {int maxBytes = 262144}) async {
