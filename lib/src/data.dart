@@ -7,6 +7,7 @@ import 'admin_api.dart';
 import 'session.dart';
 import 'usage.dart';
 import 'user_activity.dart';
+import 'user_document.dart';
 import 'user_filters.dart';
 
 /// Data access for the dashboard panels, on top of the existing API surface.
@@ -16,6 +17,8 @@ class DashboardData {
   final DashboardSession session;
   late final AdminApi adminApi =
       AdminApi(session.serviceBase, session.httpClient);
+  late final UserDocumentApi userDocumentApi =
+      UserDocumentApi(session.serviceBase, session.httpClient);
 
   /// Where per-browser choices are kept (the Users page's filters).
   final Settings settings;
@@ -144,6 +147,16 @@ class DashboardData {
             ..email = email.trim()
             ..isValidated = true,
           password);
+
+  /// The stored user document [userId], raw, for a tag edit.
+  Future<UserDocument> userDocument(String userId) =>
+      userDocumentApi.get(userId);
+
+  /// Stores [document] as it is, under its rev: a conflict (409) if the
+  /// user changed since it was read. The generic update, which the server
+  /// allows an admin.
+  Future<void> saveUserDocument(UserDocument document) =>
+      userDocumentApi.update(document);
 
   Future<sci.ResourceSummary> userResourceSummary(String userId) =>
       _f.userService.resourceSummary(userId);

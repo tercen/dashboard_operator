@@ -5,6 +5,7 @@ import '../user_activity.dart';
 import '../user_filters.dart';
 import '../widgets.dart';
 import 'create_user_dialog.dart';
+import 'edit_tags_dialog.dart';
 import 'tasks_screen.dart' show LinkText;
 
 /// The count line above the table. [shown] is the number of rows left after
@@ -600,6 +601,33 @@ class _UsersScreenState extends State<UsersScreen> {
     }
   }
 
+  /// Whether this admin may edit [user]'s tags from here: tag and role
+  /// controls act on the admin's own domain, so they are shown only on its
+  /// rows.
+  bool _canEditTags(DashboardUser user) =>
+      widget.data.session.isAdmin && user.domain == widget.data.session.domain;
+
+  /// Opens the tag editor on [user]'s stored document; after a save,
+  /// reloads the list.
+  Future<void> _editTags(
+      BuildContext context, DashboardUser user, VoidCallback refresh) async {
+    final saved = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => EditTagsDialog(
+        userName: user.name,
+        load: () => widget.data.userDocument(user.id),
+        save: widget.data.saveUserDocument,
+      ),
+    );
+    if (saved != true) return;
+    refresh();
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Saved the tags of ${user.name}'), width: 320));
+    }
+  }
+
   DataRow _userRow(
       BuildContext context, DashboardUser user, VoidCallback refresh) {
     return DataRow(cells: [
@@ -628,7 +656,18 @@ class _UsersScreenState extends State<UsersScreen> {
       DataCell(Text(formatDate(user.createdDate))),
       ..._activityCells(user),
       DataCell(_ProjectsOwned(user)),
-      DataCell(_Tags(user.tags ?? const [])),
+      DataCell(Row(mainAxisSize: MainAxisSize.min, spacing: 4, children: [
+        _Tags(user.tags ?? const []),
+        if (_canEditTags(user))
+          IconButton(
+            key: Key('edit-tags-${user.domain}-${user.id}'),
+            tooltip: 'Edit tags',
+            icon: const Icon(Icons.edit_outlined, size: 15),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            onPressed: () => _editTags(context, user, refresh),
+          ),
+      ])),
     ]);
   }
 

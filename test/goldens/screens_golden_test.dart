@@ -18,7 +18,8 @@ import '../support/fake_data.dart';
 /// manager's shell, the Users table paged, truncated, with many or very
 /// long tags, with its widest row, with a user's activity open and while
 /// the activity loads, with the filter bar set to a window or to MAU and a
-/// domain excluded, and the Create user dialog filled in and refused. The PNGs under test/goldens/ are what the Tercen colour
+/// domain excluded, the Create user dialog filled in and refused, and the
+/// Edit tags dialog with a tag added and a duplicate refused. The PNGs under test/goldens/ are what the Tercen colour
 /// scheme looks like; update them with
 /// `flutter test --update-goldens test/goldens`.
 void main() {
@@ -234,6 +235,27 @@ void main() {
       });
     }
 
+    // ada's tags being edited: one added, then a duplicate typed and
+    // refused, with the reason under the field.
+    testWidgets('Edit tags dialog, $name theme', (tester) async {
+      await _pumpApp(tester, mode, fakeAdminSession());
+      await _openUsers(tester);
+      await tester.tap(find.byKey(const Key('edit-tags--user-ada')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+          find.byKey(const Key('edit-tags-field')), 'follow-up');
+      await tester.tap(find.byKey(const Key('edit-tags-add')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('edit-tags-field')), 'pilot');
+      await tester.tap(find.byKey(const Key('edit-tags-add')));
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pumpAndSettle();
+
+      expect(find.text('"pilot" is already a tag'), findsOneWidget);
+      await _expectGolden('edit_tags_$name.png');
+      await _unmount(tester);
+    });
+
     testWidgets('narrow layout, drawer open, $name theme', (tester) async {
       await _pumpApp(tester, mode, fakeAdminSession(),
           size: const Size(390, 844));
@@ -289,11 +311,15 @@ void main() {
 
   // The edge of the worst case: at 1728 px (a 16-inch laptop) with the
   // bundled fonts, the widest row the fixtures allow fits inside the card.
-  // Nothing overflows, there is nothing to scroll to, and the "+N" chip —
-  // the last thing in the row — ends inside the card and the screen.
+  // Nothing overflows, there is nothing to scroll to, and the "+N" chip
+  // and the Edit tags button — the last things in the row — end inside
+  // the card and the screen. The admin is signed in to the row's domain,
+  // so the row has its Edit tags button.
   testWidgets('Users, worst-case row fits at 1728 px', (tester) async {
-    await _pumpApp(tester, ThemeMode.light, fakeAdminSession(),
-        data: TaggedUsersData.worstCase(), size: const Size(1728, 800));
+    final session = fakeAdminSession()..domain = 'north';
+    await _pumpApp(tester, ThemeMode.light, session,
+        data: TaggedUsersData.worstCase(session: session),
+        size: const Size(1728, 800));
     await _openUsers(tester);
 
     expect(tester.takeException(), isNull);
@@ -316,6 +342,11 @@ void main() {
             matching: find.byType(Text))).data,
         '+998');
     expect(more.right, lessThanOrEqualTo(card.right));
+    expect(
+        tester
+            .getRect(find.byKey(const Key('edit-tags-north-user-worst-case')))
+            .right,
+        lessThanOrEqualTo(card.right));
     // Every text in the table, the "+N" labels and "≥1234" included, is
     // laid out whole: no text is cut by its cell. The long tags (W…) and
     // the long object name (M…) are cut on purpose, with an ellipsis.
