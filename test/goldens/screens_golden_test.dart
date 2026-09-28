@@ -11,8 +11,8 @@ import 'package:tercen_dashboard/src/theme.dart';
 import '../support/fake_data.dart';
 
 /// Every screen, in both themes, on invented data (test/support), plus the
-/// narrow layout with its drawer open, the "Not authorized" page and the
-/// manager's shell. The PNGs
+/// narrow layout with its drawer open, the "Not authorized" page, the
+/// manager's shell, and the Users table paged and truncated. The PNGs
 /// under test/goldens/ are what the Tercen colour scheme looks like; update
 /// them with `flutter test --update-goldens test/goldens`.
 void main() {
@@ -48,6 +48,43 @@ void main() {
         await _unmount(tester);
       });
     }
+
+    // The Users table past one page: on page 2 of 3, scrolled down to the
+    // pager, with its rows-per-page menu and first/last buttons.
+    testWidgets('Users, many pages, $name theme', (tester) async {
+      await _pumpApp(tester, mode, fakeAdminSession(),
+          data: ManyUsersData(120, total: 120, truncated: false));
+      await tester.tap(find.descendant(
+          of: find.byType(NavigationRail), matching: find.text('Users')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byTooltip('Next page'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Next page'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('51–100 of 120'), findsOneWidget);
+      expect(find.text('Rows per page:'), findsOneWidget);
+      _expectSelected(tester, sections.indexOf('Users'));
+      await _expectGolden('users_paged_$name.png');
+      await _unmount(tester);
+    });
+
+    // A server that returned only part of the list says so above the table.
+    testWidgets('Users, truncated, $name theme', (tester) async {
+      await _pumpApp(tester, mode, fakeAdminSession(),
+          data: ManyUsersData(1000, total: 1840, truncated: true));
+      await tester.tap(find.descendant(
+          of: find.byType(NavigationRail), matching: find.text('Users')));
+      await tester.pumpAndSettle();
+
+      expect(
+          find.text('Showing 1000 of 1840 users — the server returned only '
+              'the first 1000'),
+          findsOneWidget);
+      _expectSelected(tester, sections.indexOf('Users'));
+      await _expectGolden('users_truncated_$name.png');
+      await _unmount(tester);
+    });
 
     testWidgets('narrow layout, drawer open, $name theme', (tester) async {
       await _pumpApp(tester, mode, fakeAdminSession(),
@@ -92,6 +129,7 @@ Future<void> _pumpApp(
   ThemeMode mode,
   DashboardSession session, {
   Size size = const Size(1280, 800),
+  FakeDashboardData? data,
 }) async {
   tester.view
     ..physicalSize = size
@@ -109,7 +147,7 @@ Future<void> _pumpApp(
     home: RoleGate(
       session: session,
       theme: theme,
-      data: FakeDashboardData(),
+      data: data ?? FakeDashboardData(),
     ),
   ));
   // Load, let the workflow-name lookups resolve, and finish every
