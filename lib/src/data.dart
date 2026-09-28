@@ -108,6 +108,20 @@ class DashboardData {
     }
   }
 
+  /// Creates a user with UserService.createUser, built as the core admin
+  /// console builds it: the name as typed, the email trimmed, and
+  /// isValidated set.
+  Future<void> createUser(
+          {required String name,
+          required String email,
+          required String password}) =>
+      _f.userService.createUser(
+          sci.User()
+            ..name = name
+            ..email = email.trim()
+            ..isValidated = true,
+          password);
+
   Future<sci.ResourceSummary> userResourceSummary(String userId) =>
       _f.userService.resourceSummary(userId);
 
