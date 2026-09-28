@@ -4,6 +4,7 @@ import 'package:sci_tercen_client/sci_client.dart' as sci;
 import '../data.dart';
 import '../platform/platform_stub.dart'
     if (dart.library.js_interop) '../platform/platform_web.dart' as platform;
+import '../theme.dart';
 import '../widgets.dart';
 
 class TasksScreen extends StatelessWidget {
@@ -305,7 +306,9 @@ class LinkText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.primary;
+    final color = (Theme.of(context).extension<DashboardColors>() ??
+            DashboardColors.dark)
+        .link;
     return InkWell(
       onTap: () => platform.openUrl(url),
       child: Row(mainAxisSize: MainAxisSize.min, children: [

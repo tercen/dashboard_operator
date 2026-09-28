@@ -112,8 +112,7 @@ class KpiTile extends StatelessWidget {
             if (detail != null) ...[
               const SizedBox(height: 2),
               Text(detail!,
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: theme.colorScheme.outline)),
+                  style: theme.textTheme.bodySmall),
             ],
           ],
         ),

@@ -157,7 +157,7 @@ class _UsersScreenState extends State<UsersScreen> {
                       size: 18,
                       color: user.isValidated
                           ? StateChip.colorsFor(context, Severity.ok).$2
-                          : Theme.of(context).colorScheme.outline,
+                          : StateChip.colorsFor(context, Severity.neutral).$2,
                     )),
                     DataCell(Text(
                         user.domain.isEmpty ? 'default' : user.domain)),

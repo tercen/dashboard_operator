@@ -101,8 +101,7 @@ class StorageScreen extends StatelessWidget {
                 'against object-store actuals is spec §9.6 follow-up work.',
                 style: Theme.of(context)
                     .textTheme
-                    .bodySmall
-                    ?.copyWith(color: Theme.of(context).colorScheme.outline),
+                    .bodySmall,
               ),
             ],
           ),

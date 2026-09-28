@@ -52,21 +52,27 @@ class _DashboardAppState extends State<DashboardApp> {
                 icon: Icons.link_off,
                 title: 'No session',
                 message: '${widget.initError}')
-            : _RoleGate(session: widget.session, theme: _theme),
+            : RoleGate(session: widget.session, theme: _theme),
       ),
     );
   }
 }
 
-class _RoleGate extends StatelessWidget {
+/// The shell for an admin or manager; a "Not authorized" page otherwise.
+class RoleGate extends StatelessWidget {
   final DashboardSession session;
   final ThemeController theme;
-  const _RoleGate({required this.session, required this.theme});
+
+  /// Passed on to [DashboardShell.data].
+  final DashboardData? data;
+
+  const RoleGate(
+      {super.key, required this.session, required this.theme, this.data});
 
   @override
   Widget build(BuildContext context) {
     if (session.isAdmin || session.isManager) {
-      return DashboardShell(session: session, theme: theme);
+      return DashboardShell(session: session, theme: theme, data: data);
     }
     return const _MessagePage(
       icon: Icons.lock_outline,
@@ -81,15 +87,21 @@ class _RoleGate extends StatelessWidget {
 class DashboardShell extends StatefulWidget {
   final DashboardSession session;
   final ThemeController theme;
+
+  /// Data source for the panels; defaults to the live API over [session].
+  /// Tests pass invented data here.
+  final DashboardData? data;
+
   const DashboardShell(
-      {super.key, required this.session, required this.theme});
+      {super.key, required this.session, required this.theme, this.data});
 
   @override
   State<DashboardShell> createState() => _DashboardShellState();
 }
 
 class _DashboardShellState extends State<DashboardShell> {
-  late final DashboardData _data = DashboardData(widget.session);
+  late final DashboardData _data =
+      widget.data ?? DashboardData(widget.session);
   int _index = 0;
   bool _restoredFromUrl = false;
 

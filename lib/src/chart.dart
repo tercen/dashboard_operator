@@ -247,7 +247,12 @@ class _RunsPainter extends CustomPainter {
 
   void _text(Canvas canvas, String value, Offset at, Color color, double size) {
     final painter = TextPainter(
-      text: TextSpan(text: value, style: TextStyle(color: color, fontSize: size)),
+      text: TextSpan(
+          text: value,
+          style: TextStyle(
+              fontFamily: TercenTokens.fontFamily,
+              color: color,
+              fontSize: size)),
       textDirection: TextDirection.ltr,
     )..layout();
     painter.paint(canvas, at);
