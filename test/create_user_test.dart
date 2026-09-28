@@ -92,6 +92,7 @@ class _UsersData extends DashboardData {
     final client = _UsersClient(rows);
     session.factory = sci.ServiceFactory();
     await session.factory.initializeWith(_base, client);
+    session.serviceBase = _base;
     return _UsersData(session, client);
   }
 

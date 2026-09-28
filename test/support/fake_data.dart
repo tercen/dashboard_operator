@@ -179,6 +179,9 @@ class FakeDashboardData extends DashboardData {
   String projectUrl(String owner, String projectId) =>
       'https://tercen.invalid/$owner/p/$projectId';
 
+  @override
+  String userUrl(String username) => 'https://tercen.invalid/$username';
+
   static sci.Worker _worker(String name, String status, int free, int cpus,
           double freeGiB, double totalGiB) =>
       sci.Worker()

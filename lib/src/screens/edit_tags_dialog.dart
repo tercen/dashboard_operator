@@ -5,7 +5,12 @@ import '../user_document.dart';
 
 /// A user's tags, edited as chips. It reads the stored user document when
 /// it opens and saves that document back with only `tags` changed, under
-/// the rev it read. Pops with true once a change is saved.
+/// the rev it read. Pops with the tags as saved once a change is saved,
+/// and with null otherwise.
+///
+/// Save first adds a tag still in the field, as Add would: a tag typed and
+/// not added is not lost. If Add would refuse it, Save shows why and does
+/// not close.
 ///
 /// A conflict — the user was changed since the document was read — is
 /// shown, and the document read again with the edits dropped: the admin
@@ -84,7 +89,8 @@ class _EditTagsDialogState extends State<EditTagsDialog> {
     }
   }
 
-  void _add() {
+  /// Adds the tag in the field, or shows why not. True when it was added.
+  bool _add() {
     final (:tag, :problem) = checkNewTag(_field.text, _tags);
     setState(() {
       _problem = problem;
@@ -92,6 +98,7 @@ class _EditTagsDialogState extends State<EditTagsDialog> {
       _field.clear();
       if (!_removed.remove(tag)) _added.add(tag);
     });
+    return tag != null;
   }
 
   void _remove(String tag) => setState(() {
@@ -102,8 +109,9 @@ class _EditTagsDialogState extends State<EditTagsDialog> {
   Future<void> _save() async {
     final document = _document;
     if (_busy || document == null) return;
+    if (_field.text.isNotEmpty && !_add()) return;
     if (!_changed) {
-      Navigator.of(context).pop(false);
+      Navigator.of(context).pop();
       return;
     }
     setState(() {
@@ -111,9 +119,10 @@ class _EditTagsDialogState extends State<EditTagsDialog> {
       _error = null;
     });
     try {
-      await widget.save(
-          document.withTagEdit(removed: {..._removed}, added: [..._added]));
-      if (mounted) Navigator.of(context).pop(true);
+      final edited =
+          document.withTagEdit(removed: {..._removed}, added: [..._added]);
+      await widget.save(edited);
+      if (mounted) Navigator.of(context).pop(edited.tags);
     } on ServiceError catch (e) {
       if (!mounted) return;
       if (e.isConflictError) {
@@ -214,7 +223,7 @@ class _EditTagsDialogState extends State<EditTagsDialog> {
         TextButton(
           onPressed: _busy && _document != null
               ? null
-              : () => Navigator.of(context).pop(false),
+              : () => Navigator.of(context).pop(),
           child: const Text('Cancel'),
         ),
         FilledButton(

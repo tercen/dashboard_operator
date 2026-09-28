@@ -161,10 +161,10 @@ class _TagChip extends StatelessWidget {
   }
 }
 
-/// The Tags cell, bounded whatever the server sends: the first [shown] tags
-/// as chips, then "+N" for the rest. The full list is the cell's tooltip.
-/// Two chips of 80 px keep a row with every role and a four-digit "+N"
-/// inside a 1280 px screen (see the worst-case golden and its edge test).
+/// A user's tags, after the name in the Name cell, bounded whatever the
+/// server sends: the first [shown] tags as chips, then "+N" for the rest.
+/// The full list is the tooltip. Two chips of 80 px keep the worst-case row
+/// inside a 1728 px screen (see the worst-case golden and its edge test).
 class _Tags extends StatelessWidget {
   static const shown = 2;
   final List<String> tags;
@@ -502,6 +502,13 @@ class _UsersScreenState extends State<UsersScreen> {
   /// Users whose Last worked on cell is open, by domain and id.
   final _expanded = <(String, String)>{};
 
+  /// Tags saved from here, by domain and id, shown in place of the listed
+  /// ones without reading the list again. [_savedOn] is the listing they
+  /// were saved over: the next one the panel loads replaces them.
+  final _savedTags = <(String, String), List<String>>{};
+  UserListing? _listing;
+  UserListing? _savedOn;
+
   @override
   void initState() {
     super.initState();
@@ -607,11 +614,10 @@ class _UsersScreenState extends State<UsersScreen> {
   bool _canEditTags(DashboardUser user) =>
       widget.data.session.isAdmin && user.domain == widget.data.session.domain;
 
-  /// Opens the tag editor on [user]'s stored document; after a save,
-  /// reloads the list.
-  Future<void> _editTags(
-      BuildContext context, DashboardUser user, VoidCallback refresh) async {
-    final saved = await showDialog<bool>(
+  /// Opens the tag editor on [user]'s stored document; after a save, the
+  /// row shows the tags as saved at once.
+  Future<void> _editTags(BuildContext context, DashboardUser user) async {
+    final saved = await showDialog<List<String>>(
       context: context,
       barrierDismissible: false,
       builder: (_) => EditTagsDialog(
@@ -620,8 +626,13 @@ class _UsersScreenState extends State<UsersScreen> {
         save: widget.data.saveUserDocument,
       ),
     );
-    if (saved != true) return;
-    refresh();
+    if (saved == null) return;
+    if (mounted) {
+      setState(() {
+        _savedOn = _listing;
+        _savedTags[(user.domain, user.id)] = saved;
+      });
+    }
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Saved the tags of ${user.name}'), width: 320));
@@ -630,20 +641,41 @@ class _UsersScreenState extends State<UsersScreen> {
 
   DataRow _userRow(
       BuildContext context, DashboardUser user, VoidCallback refresh) {
+    final tags = _savedTags[(user.domain, user.id)] ?? user.tags ?? const [];
     return DataRow(cells: [
-      DataCell(Text(user.name,
-          key: user.name == _revealedName ? _revealKey : null)),
+      // The name links to the user's page in Tercen; their tags follow it,
+      // with the Edit tags control on the rows this admin may edit.
+      DataCell(Row(mainAxisSize: MainAxisSize.min, children: [
+        LinkText(
+            key: user.name == _revealedName ? _revealKey : null,
+            text: user.name,
+            url: widget.data.userUrl(user.name)),
+        if (tags.isNotEmpty) ...[const SizedBox(width: 6), _Tags(tags)],
+        // No gap before the button: its 28 px hold their own padding.
+        if (_canEditTags(user))
+          IconButton(
+            key: Key('edit-tags-${user.domain}-${user.id}'),
+            tooltip: 'Edit tags',
+            icon: const Icon(Icons.edit_outlined, size: 15),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            onPressed: () => _editTags(context, user),
+          ),
+      ])),
       DataCell(Text(user.email)),
       // A Row, not a Wrap: a Wrap in a Row leaves its gaps out of the
       // column's width, and three roles overflowed the cell.
       DataCell(Row(spacing: 4, children: [
         for (final role in user.roles)
           if (role != 'user') StateChip(role),
-        _RoleMenu(
-          roles: user.roles,
-          onChange: (role, grant) =>
-              _changeRole(context, user, role, grant, refresh),
-        ),
+        // Role controls act on the admin's own domain, so they are shown
+        // only on its rows.
+        if (_canEditTags(user))
+          _RoleMenu(
+            roles: user.roles,
+            onChange: (role, grant) =>
+                _changeRole(context, user, role, grant, refresh),
+          ),
       ])),
       DataCell(Icon(
         user.isValidated ? Icons.check_circle_outline : Icons.hourglass_empty,
@@ -656,18 +688,6 @@ class _UsersScreenState extends State<UsersScreen> {
       DataCell(Text(formatDate(user.createdDate))),
       ..._activityCells(user),
       DataCell(_ProjectsOwned(user)),
-      DataCell(Row(mainAxisSize: MainAxisSize.min, spacing: 4, children: [
-        _Tags(user.tags ?? const []),
-        if (_canEditTags(user))
-          IconButton(
-            key: Key('edit-tags-${user.domain}-${user.id}'),
-            tooltip: 'Edit tags',
-            icon: const Icon(Icons.edit_outlined, size: 15),
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-            onPressed: () => _editTags(context, user, refresh),
-          ),
-      ])),
     ]);
   }
 
@@ -905,6 +925,8 @@ class _UsersScreenState extends State<UsersScreen> {
         const SizedBox(width: 8),
       ],
       builder: (context, listing, refresh) {
+        _listing = listing;
+        if (!identical(listing, _savedOn)) _savedTags.clear();
         final counted = _count(listing);
         final visible = counted.users
             .where((u) =>
@@ -1038,7 +1060,7 @@ class _UsersScreenState extends State<UsersScreen> {
                           },
                     showEmptyRows: false,
                     showFirstLastButtons: true,
-                    // Ten columns or more: at the default spacing the last
+                    // Nine columns or more: at the default spacing the last
                     // ones fall off a laptop-width screen.
                     columnSpacing: 20,
                     columns: [
@@ -1068,7 +1090,6 @@ class _UsersScreenState extends State<UsersScreen> {
                           label: Text('PROJECTS\nOWNED',
                               textAlign: TextAlign.end),
                           numeric: true),
-                      const DataColumn(label: Text('TAGS')),
                     ],
                     source: _UserRows(
                         visible, (user) => _userRow(context, user, refresh)),
