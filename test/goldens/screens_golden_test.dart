@@ -9,6 +9,7 @@ import 'package:sci_http_client/error.dart';
 import 'package:tercen_dashboard/src/app.dart';
 import 'package:tercen_dashboard/src/session.dart';
 import 'package:tercen_dashboard/src/theme.dart';
+import 'package:tercen_dashboard/src/user_filters.dart';
 
 import '../support/fake_data.dart';
 
@@ -16,7 +17,8 @@ import '../support/fake_data.dart';
 /// narrow layout with its drawer open, the "Not authorized" page, the
 /// manager's shell, the Users table paged, truncated, with many or very
 /// long tags, with its widest row, with a user's activity open and while
-/// the activity loads, and the Create user dialog filled in and refused. The PNGs under test/goldens/ are what the Tercen colour
+/// the activity loads, with the filter bar set to a window or to MAU and a
+/// domain excluded, and the Create user dialog filled in and refused. The PNGs under test/goldens/ are what the Tercen colour
 /// scheme looks like; update them with
 /// `flutter test --update-goldens test/goldens`.
 void main() {
@@ -144,6 +146,42 @@ void main() {
       await _expectGolden('users_activity_open_$name.png');
       await _unmount(tester);
     });
+
+    // The filter bar set: a chosen window, with its Days in window column,
+    // and tercen.example excluded — admin's row gone and out of the count.
+    // Then the MAU preset over the same exclusion, on the fixed clock:
+    // ada and margaret were active, grace was not, and linus's activity
+    // could not be counted, so the MAU reads 2 to 3.
+    for (final (state, filters) in [
+      (
+        'window',
+        const UserFilters(
+            mode: WindowMode.custom,
+            from: '2026-09-01',
+            to: '2026-09-21',
+            excluded: ['tercen.example']),
+      ),
+      (
+        'mau',
+        const UserFilters(mode: WindowMode.mau, excluded: ['tercen.example']),
+      ),
+    ]) {
+      testWidgets('Users, filtered by $state, $name theme', (tester) async {
+        await _pumpApp(tester, mode, fakeAdminSession(),
+            data: FilteredUsersData(filters));
+        await _openUsers(tester);
+
+        expect(find.text('admin@tercen.example'), findsNothing);
+        expect(find.byKey(const Key('excluded-tercen.example')),
+            findsOneWidget);
+        expect(find.text('DAYS IN\nWINDOW'), findsOneWidget);
+        expect(find.text('grace'), state == 'mau' ? findsNothing : findsOneWidget);
+        expect(tester.takeException(), isNull);
+        _expectSelected(tester, sections.indexOf('Users'));
+        await _expectGolden('users_filtered_${state}_$name.png');
+        await _unmount(tester);
+      });
+    }
 
     // While listUserActivity is still counting: the list is there, the
     // activity cells say so, and a line above the table explains.

@@ -313,7 +313,7 @@ void main() {
 
     testWidgets('with a filter the new user does not match', (tester) async {
       await _pump(tester, rows: _manyRows());
-      await tester.enterText(find.byType(TextField).first, 'user-07');
+      await tester.enterText(find.byKey(const Key('users-search')), 'user-07');
       await tester.pumpAndSettle();
       expect(find.text('Showing 10 of 120 users'), findsOneWidget);
 
@@ -321,7 +321,7 @@ void main() {
       // The filter is cleared, so the new row is not hidden by it.
       expect(find.text('Showing 121 of 121 users'), findsOneWidget);
       expect(
-          tester.widget<TextField>(find.byType(TextField).first)
+          tester.widget<TextField>(find.byKey(const Key('users-search')))
               .controller!
               .text,
           isEmpty);
@@ -338,7 +338,7 @@ void main() {
 
       // Nine matches: without the reset the table would open at row 101,
       // past the end, and show an empty page.
-      await tester.enterText(find.byType(TextField).first, 'user-00');
+      await tester.enterText(find.byKey(const Key('users-search')), 'user-00');
       await tester.pumpAndSettle();
       expect(find.text('Showing 9 of 121 users'), findsOneWidget);
       expect(find.text('1–9 of 9'), findsOneWidget);

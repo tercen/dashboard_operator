@@ -2,33 +2,46 @@ import 'package:flutter/material.dart';
 
 import '../data.dart';
 import '../user_activity.dart';
+import '../user_filters.dart';
 import '../widgets.dart';
 import 'create_user_dialog.dart';
 import 'tasks_screen.dart' show LinkText;
 
 /// The count line above the table. [shown] is the number of rows left after
-/// the filter. The total is the server's when it reports one; otherwise it
+/// the filters. The total is the server's when it reports one; otherwise it
 /// is the number of users loaded, and the line says the total is unknown.
 /// It claims only what the response supports: a server that says the list is
 /// truncated but gives no total has not said why, so the line does not blame
 /// the limit.
-String showingBanner(UserListing listing, int shown) {
+///
+/// [excluded] loaded users were left out by email domain: they leave every
+/// count here. Of the users the server did not return, nobody knows how many
+/// an exclusion would leave out, so a list with more to it is counted as
+/// "the first N" and not against the server's total.
+String showingBanner(UserListing listing, int shown, {int excluded = 0}) {
   final loaded = listing.users.length;
+  final kept = loaded - excluded;
   final total = listing.total;
+  final note =
+      excluded == 0 ? '' : ' ($excluded excluded by email domain)';
   if (total != null) {
-    return listing.mayHaveMore
+    if (!listing.mayHaveMore) {
+      return 'Showing $shown of ${total - excluded} users$note';
+    }
+    return excluded == 0
         ? 'Showing $shown of $total users — the server returned only the '
             'first $loaded'
-        : 'Showing $shown of $total users';
+        : 'Showing $shown of the first $kept users$note — the server '
+            'returned only the first $loaded of $total';
   }
   if (listing.truncated == true) {
-    return 'Showing $shown of the first $loaded users — the server reported '
-        'the list as incomplete; it does not report a total';
+    return 'Showing $shown of the first $kept users$note — the server '
+        'reported the list as incomplete; it does not report a total';
   }
   return listing.mayHaveMore
-      ? 'Showing $shown of the first $loaded users — the list stopped at the '
-          'limit of ${listing.limit}; this server does not report a total'
-      : 'Showing $shown of $loaded users loaded; this server does not '
+      ? 'Showing $shown of the first $kept users$note — the list stopped at '
+          'the limit of ${listing.limit}; this server does not report a total'
+      : 'Showing $shown of $kept users loaded$note; this server does not '
           'report a total';
 }
 
@@ -52,18 +65,13 @@ class _UserRows extends DataTableSource {
   int get selectedRowCount => 0;
 }
 
+/// The Users page. Its filters — the activity window, the MAU preset and
+/// the excluded email domains — are kept in [DashboardData.settings] and
+/// restored on load.
 class UsersScreen extends StatefulWidget {
   final DashboardData data;
 
-  /// The days the Days in window column counts. All time (the default)
-  /// shows no such column; a new window reloads the activity.
-  final ActivityWindow activityWindow;
-
-  const UsersScreen({
-    super.key,
-    required this.data,
-    this.activityWindow = const ActivityWindow.allTime(),
-  });
+  const UsersScreen({super.key, required this.data});
 
   @override
   State<UsersScreen> createState() => _UsersScreenState();
@@ -420,6 +428,18 @@ class _ActivityStatus extends StatelessWidget {
   }
 }
 
+/// The users the filters leave, and how many they left out: [excluded]
+/// by email domain, and with [byActivity] (MAU, activity loaded) the
+/// [unknown] ones whose activity in the window could not be counted.
+class _Counted {
+  final List<DashboardUser> users;
+  final int excluded;
+  final int unknown;
+  final bool byActivity;
+  const _Counted(this.users,
+      {required this.excluded, this.unknown = 0, this.byActivity = false});
+}
+
 /// Material draws no scrollbar on a horizontal scroll view, so a table wider
 /// than the card would hide its last columns without a sign. This one shows
 /// the horizontal thumb whenever there is something to scroll to: under the
@@ -463,6 +483,15 @@ class _UsersScreenState extends State<UsersScreen> {
   /// baseline every account carries and is not offered here.
   static const _roles = ['manager', 'operator', 'admin'];
 
+  /// The filter bar's settings, and the window last asked for: all time
+  /// shows no Days in window column; a new window reloads the activity.
+  late UserFilters _filters = UserFilters.load(widget.data.settings);
+  ActivityWindow _window = const ActivityWindow.allTime();
+  final _excludeField = TextEditingController();
+
+  /// Goes up with each filter change: the table starts again at page one.
+  int _filterChanges = 0;
+
   /// The activity columns: loaded once per window, beside the list.
   _ActivityState _activityState = _ActivityState.loading;
   UserActivityReport? _activity;
@@ -479,30 +508,40 @@ class _UsersScreenState extends State<UsersScreen> {
   }
 
   @override
-  void didUpdateWidget(UsersScreen old) {
-    super.didUpdateWidget(old);
-    if (old.activityWindow != widget.activityWindow) _loadActivity();
-  }
-
-  @override
   void dispose() {
     _filterField.dispose();
+    _excludeField.dispose();
     super.dispose();
   }
 
-  /// Asks for the activity and fills the columns when it comes. An answer
-  /// to an older request (the window changed meanwhile) is dropped.
+  /// Keeps [filters], and reloads the activity when they name a window
+  /// other than the one last asked for — which, for MAU, is also the case
+  /// once the UTC day has moved on since.
+  void _setFilters(UserFilters filters) {
+    final reload = filters.window(widget.data.now()) != _window;
+    setState(() {
+      _filters = filters;
+      _filterChanges++;
+    });
+    filters.save(widget.data.settings);
+    if (reload) _loadActivity();
+  }
+
+  /// Asks for the activity over the filters' window and fills the columns
+  /// when it comes. An answer to an older request (the window changed
+  /// meanwhile) is dropped.
   Future<void> _loadActivity() async {
     final request = ++_activityRequest;
+    final window = _filters.window(widget.data.now());
     if (mounted) {
       setState(() {
+        _window = window;
         _activityState = _ActivityState.loading;
         _activityError = null;
       });
     }
     try {
-      final report =
-          await widget.data.userActivity(window: widget.activityWindow);
+      final report = await widget.data.userActivity(window: window);
       if (!mounted || request != _activityRequest) return;
       setState(() {
         _activity = report;
@@ -593,7 +632,9 @@ class _UsersScreenState extends State<UsersScreen> {
     ]);
   }
 
-  bool get _windowed => !widget.activityWindow.isAllTime;
+  /// A window, on a server that counts one.
+  bool get _windowed =>
+      !_window.isAllTime && _activityState != _ActivityState.unavailable;
 
   /// Last worked on, Active days and — with a window — Days in window.
   List<DataCell> _activityCells(DashboardUser user) {
@@ -623,6 +664,181 @@ class _UsersScreenState extends State<UsersScreen> {
     ];
   }
 
+  /// The users the filters leave: none of the excluded email domains, and
+  /// under MAU, once the activity is in, only those active in the window.
+  _Counted _count(UserListing listing) {
+    final kept = [
+      for (final u in listing.users)
+        if (!_filters.excludes(u)) u,
+    ];
+    final excluded = listing.users.length - kept.length;
+    if (!_filters.isMau || _activityState != _ActivityState.loaded) {
+      return _Counted(kept, excluded: excluded);
+    }
+    final active = <DashboardUser>[];
+    var unknown = 0;
+    for (final u in kept) {
+      switch (windowActivity(_activity?[(u.domain, u.id)])) {
+        case WindowActivity.active:
+          active.add(u);
+        case WindowActivity.unknown:
+          unknown++;
+        case WindowActivity.inactive:
+          break;
+      }
+    }
+    return _Counted(active,
+        excluded: excluded, unknown: unknown, byActivity: true);
+  }
+
+  /// The line under the count in MAU mode: the window, and what the MAU
+  /// cannot say — users whose activity could not be counted are neither
+  /// active nor inactive, so they make the MAU a range, and a list the
+  /// server cut short counts only the users it returned.
+  String? _mauNote(UserListing listing, _Counted counted) {
+    if (!_filters.isMau) return null;
+    final window = '$_window (UTC)';
+    switch (_activityState) {
+      case _ActivityState.loading:
+        return 'MAU, $window: waiting for the activity — until it comes '
+            'the list is not narrowed to active users';
+      case _ActivityState.failed:
+        return 'MAU unavailable: the activity could not be loaded, so the '
+            'list is not narrowed to active users';
+      case _ActivityState.unavailable:
+        return 'MAU unavailable: this server does not report user activity';
+      case _ActivityState.loaded:
+        final active = counted.users.length;
+        final unknown = counted.unknown;
+        final range = unknown == 0
+            ? '$active'
+            : '$active to ${active + unknown}: $unknown more '
+                '${unknown == 1 ? 'user' : 'users'} whose activity in the '
+                'window could not be counted ${unknown == 1 ? 'is' : 'are'} '
+                'not shown';
+        final part = listing.mayHaveMore
+            ? ' — of the users loaded; the server returned only part of '
+                'the list'
+            : '';
+        return 'MAU, $window: users active in the window — $range$part';
+    }
+  }
+
+  Future<void> _chooseWindow(BuildContext context) async {
+    final utc = widget.data.now().toUtc();
+    final today = DateTime(utc.year, utc.month, utc.day);
+    DateTime? day(String s) {
+      final d = DateTime.tryParse(s);
+      return d == null ? null : DateTime(d.year, d.month, d.day);
+    }
+
+    final current = _filters.mode == WindowMode.allTime
+        ? null
+        : (day(_window.from), day(_window.to));
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2015),
+      lastDate: today,
+      currentDate: today,
+      initialDateRange: current == null ||
+              current.$1 == null ||
+              current.$2 == null ||
+              current.$2!.isAfter(today)
+          ? null
+          : DateTimeRange(start: current.$1!, end: current.$2!),
+      helpText: 'Activity window, UTC days, both included',
+    );
+    if (picked == null) return;
+    _setFilters(_filters.copyWith(
+        mode: WindowMode.custom,
+        from: formatDay(picked.start),
+        to: formatDay(picked.end)));
+  }
+
+  void _addExclusion(String typed) {
+    final domain = normalizeDomain(typed);
+    _excludeField.clear();
+    if (domain.isEmpty || _filters.excluded.contains(domain)) return;
+    _setFilters(_filters.copyWith(excluded: [..._filters.excluded, domain]));
+  }
+
+  /// Activity: all time, a chosen window, or MAU; then the excluded email
+  /// domains. The window choices are off on a server without activity.
+  Widget _filterBar(BuildContext context) {
+    final theme = Theme.of(context);
+    final noActivity = _activityState == _ActivityState.unavailable;
+    const offTip = 'This server does not report user activity';
+    Widget choice(Key key, String label, bool selected, String tip,
+            VoidCallback onTap) =>
+        Tooltip(
+          message: noActivity ? offTip : tip,
+          child: ChoiceChip(
+            key: key,
+            label: Text(label),
+            selected: selected,
+            showCheckmark: false,
+            visualDensity: VisualDensity.compact,
+            onSelected: noActivity ? null : (_) => onTap(),
+          ),
+        );
+    final mode = _filters.mode;
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        Text('Activity', style: theme.textTheme.labelSmall),
+        choice(
+            const Key('filter-all-time'),
+            'All time',
+            mode == WindowMode.allTime,
+            'Active days over all time; no window',
+            () => _setFilters(_filters.copyWith(mode: WindowMode.allTime))),
+        choice(
+            const Key('filter-window'),
+            mode == WindowMode.custom
+                ? '${_filters.from} – ${_filters.to}'
+                : 'Choose dates…',
+            mode == WindowMode.custom,
+            'Count active days between two UTC days, both included',
+            () => _chooseWindow(context)),
+        choice(
+            const Key('filter-mau'),
+            'MAU · last ${UserFilters.mauDays} days',
+            mode == WindowMode.mau,
+            'Only users active in the last ${UserFilters.mauDays} days '
+                '(UTC, today included); the count is the MAU',
+            () => _setFilters(_filters.copyWith(mode: WindowMode.mau))),
+        const SizedBox(width: 12),
+        Text('Exclude', style: theme.textTheme.labelSmall),
+        for (final domain in _filters.excluded)
+          InputChip(
+            key: Key('excluded-$domain'),
+            label: Text('@$domain'),
+            visualDensity: VisualDensity.compact,
+            deleteButtonTooltipMessage: 'Include @$domain again',
+            onDeleted: () => _setFilters(_filters.copyWith(excluded: [
+              for (final d in _filters.excluded)
+                if (d != domain) d,
+            ])),
+          ),
+        SizedBox(
+          width: 200,
+          child: TextField(
+            key: const Key('filter-exclude'),
+            controller: _excludeField,
+            decoration: const InputDecoration(
+              isDense: true,
+              hintText: 'Email domain, e.g. example.test',
+              border: OutlineInputBorder(),
+            ),
+            onSubmitted: _addExclusion,
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return RefreshingPanel<UserListing>(
@@ -633,6 +849,7 @@ class _UsersScreenState extends State<UsersScreen> {
         SizedBox(
           width: 240,
           child: TextField(
+            key: const Key('users-search'),
             controller: _filterField,
             decoration: const InputDecoration(
               isDense: true,
@@ -649,7 +866,8 @@ class _UsersScreenState extends State<UsersScreen> {
         const SizedBox(width: 8),
       ],
       builder: (context, listing, refresh) {
-        final visible = listing.users
+        final counted = _count(listing);
+        final visible = counted.users
             .where((u) =>
                 _filter.isEmpty ||
                 u.name.toLowerCase().contains(_filter) ||
@@ -657,15 +875,34 @@ class _UsersScreenState extends State<UsersScreen> {
                 u.domain.toLowerCase().contains(_filter))
             .toList();
         final theme = Theme.of(context);
-        // The count line, and for admins the Create user button beside it.
+        // A created user the filters hide is not waited for.
+        if (_reveal != null &&
+            !visible.any((u) => u.name == _reveal) &&
+            listing.users.any((u) => u.name == _reveal)) {
+          _reveal = null;
+        }
+        final mauNote = _mauNote(listing, counted);
+        // The filter bar, the count line, and for admins the Create user
+        // button beside it.
         final banner = Row(children: [
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(showingBanner(listing, visible.length),
+                _filterBar(context),
+                const SizedBox(height: 8),
+                Text(
+                    showingBanner(listing, visible.length,
+                        excluded: counted.excluded),
                     key: const Key('users-banner'),
                     style: theme.textTheme.bodySmall),
+                if (mauNote != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(mauNote,
+                        key: const Key('mau-note'),
+                        style: theme.textTheme.bodySmall),
+                  ),
                 _ActivityStatus(_activityState, _activityError, _loadActivity),
               ],
             ),
@@ -741,9 +978,11 @@ class _UsersScreenState extends State<UsersScreen> {
                 child: ScrollConfiguration(
                   behavior: const _HorizontalScrollbar(),
                   child: PaginatedDataTable(
-                    // A new filter starts again at the first page; a created
-                    // user opens it at theirs.
-                    key: ValueKey((_filter, _revealed)),
+                    // A new filter starts again at the first page, and so
+                    // does the MAU list once the activity filters it; a
+                    // created user opens it at theirs.
+                    key: ValueKey(
+                        (_filter, _filterChanges, counted.byActivity, _revealed)),
                     initialFirstRowIndex: _firstRow,
                     // The table keeps a full page of height below the last
                     // row, so a list that fits on one page gets a page of its
@@ -782,8 +1021,7 @@ class _UsersScreenState extends State<UsersScreen> {
                         DataColumn(
                             label: const Text('DAYS IN\nWINDOW',
                                 textAlign: TextAlign.end),
-                            tooltip:
-                                'Days with activity, ${widget.activityWindow}',
+                            tooltip: 'Days with activity, $_window (UTC)',
                             numeric: true),
                       // On two lines: on one, the heading is three times
                       // as wide as a four-digit count.
