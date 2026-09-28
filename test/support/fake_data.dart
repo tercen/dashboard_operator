@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:sci_tercen_client/sci_client.dart' as sci;
 
 import 'package:tercen_dashboard/src/admin_api.dart';
 import 'package:tercen_dashboard/src/data.dart';
 import 'package:tercen_dashboard/src/session.dart';
 import 'package:tercen_dashboard/src/usage.dart';
+import 'package:tercen_dashboard/src/user_activity.dart';
 
 /// A signed-in admin, without a server: enough for the role gate and the
 /// rail's avatar. Every name here is invented.
@@ -222,6 +225,102 @@ class FakeDashboardData extends DashboardData {
         ],
       );
 
+  /// Invented activity for [users]: ada has ten objects — a deleted
+  /// workflow and a file whose project is gone among them — and more
+  /// activity than the budget read, so her count is a lower bound; grace
+  /// has none; the server could not read linus's (unknown, not 0).
+  @override
+  Future<UserActivityReport?> userActivity(
+          {ActivityWindow window = const ActivityWindow.allTime()}) async =>
+      fakeActivityReport(window);
+
+  static UserActivityReport fakeActivityReport(ActivityWindow window,
+      {List<UserActivity> extra = const []}) {
+    final windowed = !window.isAllTime;
+    ActivityObject object(String kind, String id, String name, String date,
+            {String type = 'update',
+            String project = 'pr000000000000000001',
+            String projectName = 'Pilot study',
+            String? owner = 'lab-alpha'}) =>
+        ActivityObject(
+          kind: kind,
+          id: id,
+          name: name,
+          type: type,
+          date: date,
+          projectId: project,
+          projectName: projectName,
+          owner: owner,
+        );
+    return UserActivityReport([
+      UserActivity(
+        id: 'user-admin',
+        name: 'admin',
+        domain: '',
+        activeDays: 214,
+        activeDaysInWindow: windowed ? 12 : null,
+        recent: [
+          object('Project', 'pr000000000000000009', 'Operator tests',
+              '2026-09-20T10:00:00',
+              project: 'pr000000000000000009',
+              projectName: 'Operator tests',
+              owner: 'admin'),
+        ],
+      ),
+      UserActivity(
+        id: 'user-ada',
+        name: 'ada',
+        domain: '',
+        activeDays: 96,
+        activeDaysInWindow: windowed ? 18 : null,
+        truncated: true,
+        windowTruncated: false,
+        recent: [
+          object('Workflow', 'wf000000000000000001', 'Flow cytometry',
+              '2026-09-21T14:02:00'),
+          object('Project', 'pr000000000000000001', 'Pilot study',
+              '2026-09-21T13:48:00'),
+          object('Workflow', 'wf000000000000000003', 'Old gating',
+              '2026-09-20T16:30:00',
+              type: 'delete'),
+          object('FileDocument', 'fd000000000000000001', 'plate-07.csv',
+              '2026-09-19T09:12:00',
+              project: 'pr000000000000000004',
+              projectName: 'Removed project',
+              owner: null),
+          for (var i = 4; i <= 9; i++)
+            object('Workflow', 'wf00000000000000001$i', 'Panel $i analysis',
+                '2026-09-${(18 - i).toString().padLeft(2, '0')}T11:00:00'),
+        ],
+      ),
+      UserActivity(
+        id: 'user-grace',
+        name: 'grace',
+        domain: '',
+        activeDays: 0,
+        activeDaysInWindow: windowed ? 0 : null,
+        recent: const [],
+      ),
+      UserActivity(id: 'user-linus', name: 'linus', domain: 'north'),
+      UserActivity(
+        id: 'user-margaret',
+        name: 'margaret',
+        domain: 'north',
+        activeDays: 1,
+        activeDaysInWindow: windowed ? 1 : null,
+        windowTruncated: false,
+        recent: [
+          object('Workflow', 'wf000000000000000002', 'RNA-seq QC',
+              '2026-09-20T17:40:00',
+              project: 'pr000000000000000002',
+              projectName: 'Beta cohort',
+              owner: 'team-beta'),
+        ],
+      ),
+      ...extra,
+    ], window: windowed ? window : null, budget: 20000);
+  }
+
   @override
   Future<UsageReport> usageReport({
     required String scope,
@@ -414,6 +513,34 @@ class TaggedUsersData extends FakeDashboardData {
           owned: 1234,
         );
 
+  /// The widest activity the fixtures allow: a name longer than a cell,
+  /// "+9" and a four-digit lower bound.
+  @override
+  Future<UserActivityReport?> userActivity(
+          {ActivityWindow window = const ActivityWindow.allTime()}) async =>
+      FakeDashboardData.fakeActivityReport(window, extra: [
+        UserActivity(
+          id: 'user-$name',
+          name: name,
+          domain: domain,
+          activeDays: 1234,
+          truncated: true,
+          recent: [
+            for (var i = 0; i < 10; i++)
+              ActivityObject(
+                kind: 'Workflow',
+                id: 'wf00000000000000009$i',
+                name: 'M' * 60,
+                type: 'update',
+                date: '2026-09-21T09:00:00',
+                projectId: 'pr000000000000000001',
+                projectName: 'Pilot study',
+                owner: 'lab-alpha',
+              ),
+          ],
+        ),
+      ]);
+
   @override
   Future<UserListing> users({int limit = UserRows.serverMaxLimit}) async {
     final listing = await super.users(limit: limit);
@@ -439,4 +566,13 @@ class TaggedUsersData extends FakeDashboardData {
       ],
     );
   }
+}
+
+/// [FakeDashboardData] whose activity never arrives: the Users page as it
+/// is during the seconds listUserActivity takes.
+class ActivityLoadingData extends FakeDashboardData {
+  @override
+  Future<UserActivityReport?> userActivity(
+          {ActivityWindow window = const ActivityWindow.allTime()}) =>
+      Completer<UserActivityReport?>().future;
 }

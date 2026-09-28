@@ -110,6 +110,19 @@ class AdminApi {
     );
   }
 
+  /// POST api/v1/admin/listUserActivity — per user, the last distinct
+  /// objects touched and the active days (tercen/sci#1667). Admin only.
+  ///
+  /// [from]/[to] are inclusive YYYY-MM-DD UTC days, both empty for all
+  /// time; [budget] is the activities read per user, 0 for the server's
+  /// default. A server without the route answers 404, raised as
+  /// [unavailableCode]. The call is slow (seconds for thousands of users):
+  /// never make a page wait for it.
+  Future<Map<String, dynamic>> listUserActivity(
+          {String from = '', String to = '', int budget = 0}) =>
+      _jsonCall('api/v1/admin/listUserActivity',
+          {'from': from, 'to': to, 'budget': budget});
+
   /// POST api/v1/admin/grantRole | revokeRole — returns the new role list.
   Future<List<String>> changeRole({
     required String username,

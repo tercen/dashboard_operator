@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../data.dart';
+import '../user_activity.dart';
 import '../widgets.dart';
 import 'create_user_dialog.dart';
+import 'tasks_screen.dart' show LinkText;
 
 /// The count line above the table. [shown] is the number of rows left after
 /// the filter. The total is the server's when it reports one; otherwise it
@@ -52,7 +54,16 @@ class _UserRows extends DataTableSource {
 
 class UsersScreen extends StatefulWidget {
   final DashboardData data;
-  const UsersScreen({super.key, required this.data});
+
+  /// The days the Days in window column counts. All time (the default)
+  /// shows no such column; a new window reloads the activity.
+  final ActivityWindow activityWindow;
+
+  const UsersScreen({
+    super.key,
+    required this.data,
+    this.activityWindow = const ActivityWindow.allTime(),
+  });
 
   @override
   State<UsersScreen> createState() => _UsersScreenState();
@@ -166,6 +177,249 @@ class _Tags extends StatelessWidget {
   }
 }
 
+/// Where the activity columns stand. They load beside the list, which
+/// never waits for them: listUserActivity takes seconds.
+enum _ActivityState { loading, loaded, failed, unavailable }
+
+/// Muted text for what is not a value: "unknown", "none", the loading mark.
+class _Muted extends StatelessWidget {
+  final String text;
+  final bool italic;
+  const _Muted(this.text, {super.key, this.italic = true});
+
+  @override
+  Widget build(BuildContext context) => Text(text,
+      style: TextStyle(
+        fontStyle: italic ? FontStyle.italic : null,
+        color: StateChip.colorsFor(context, Severity.neutral).$2,
+      ));
+}
+
+/// An activity cell before its value is known: loading, failed, or blank
+/// on a server without listUserActivity. Null once the value is there.
+Widget? _pendingCell(_ActivityState state, Object? error) => switch (state) {
+      _ActivityState.loading => const Tooltip(
+          message: 'Loading activity',
+          child: _Muted('…', key: Key('activity-loading'), italic: false)),
+      _ActivityState.failed => Tooltip(
+          message: 'Activity could not be loaded: $error',
+          child: const Icon(Icons.error_outline,
+              key: Key('activity-error'), size: 16)),
+      _ActivityState.unavailable => const SizedBox.shrink(),
+      _ActivityState.loaded => null,
+    };
+
+/// An active-days count: the number; "≥N" when the server stopped reading
+/// before the user's oldest activity, so N is a lower bound; "unknown" —
+/// muted and italic, never a number — when the server could not count.
+class _ActiveDays extends StatelessWidget {
+  final int? days;
+  final bool lowerBound;
+  const _ActiveDays(this.days, {required this.lowerBound});
+
+  @override
+  Widget build(BuildContext context) {
+    final days = this.days;
+    if (days == null) {
+      return const Tooltip(
+        message: "The server could not read this user's activity",
+        child: _Muted('unknown', key: Key('active-days-unknown')),
+      );
+    }
+    if (!lowerBound) return Text('$days');
+    return Tooltip(
+      message: 'At least $days: the server stopped reading at its budget, '
+          'before the oldest activity',
+      child: Text('≥$days'),
+    );
+  }
+}
+
+/// One object in the Last worked on cell: a kind icon and its name, a link
+/// to it in Tercen when its project's owner is known. A deleted object is
+/// struck through and marked, and not linked: the link would lead nowhere.
+class _ActivityEntry extends StatelessWidget {
+  static const maxWidth = 200.0;
+  final ActivityObject entry;
+  final DashboardData data;
+  const _ActivityEntry(this.entry, this.data);
+
+  /// The object's page: a workflow's own, anything else its project's.
+  /// None without an owner.
+  static String? url(DashboardData data, ActivityObject e) {
+    final owner = e.owner;
+    if (owner == null) return null;
+    if (e.kind == 'Workflow') return data.workflowUrl(owner, e.id);
+    final projectId = e.projectId.isNotEmpty
+        ? e.projectId
+        : (e.kind == 'Project' ? e.id : '');
+    return projectId.isEmpty ? null : data.projectUrl(owner, projectId);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = StateChip.colorsFor(context, Severity.neutral).$2;
+    final label = entry.name.isNotEmpty ? entry.name : entry.kind;
+    final link = entry.isDeleted ? null : url(data, entry);
+    final Widget text;
+    if (entry.isDeleted) {
+      text = Row(mainAxisSize: MainAxisSize.min, children: [
+        Flexible(
+          child: Text(label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  color: muted, decoration: TextDecoration.lineThrough)),
+        ),
+        const SizedBox(width: 4),
+        Text('deleted',
+            key: const Key('activity-deleted'),
+            style: TextStyle(
+                color: muted, fontSize: 11, fontStyle: FontStyle.italic)),
+      ]);
+    } else if (link == null) {
+      text = Text(label, maxLines: 1, overflow: TextOverflow.ellipsis);
+    } else {
+      text = LinkText(text: label, url: link);
+    }
+    final where = entry.projectName.isEmpty ? '' : ' · ${entry.projectName}';
+    return Tooltip(
+      message: '${entry.kind} · ${entry.type} ${formatDate(entry.date)}$where',
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: maxWidth),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(
+              switch (entry.kind) {
+                'Workflow' => Icons.account_tree_outlined,
+                'Project' => Icons.folder_outlined,
+                _ => Icons.description_outlined,
+              },
+              size: 14,
+              color: muted),
+          const SizedBox(width: 4),
+          Flexible(child: text),
+        ]),
+      ),
+    );
+  }
+}
+
+/// The Last worked on cell: the latest object and a "+N" toggle; open,
+/// every object the server sent (at most ten), newest first, in the row.
+class _RecentCell extends StatelessWidget {
+  final List<ActivityObject>? recent;
+  final DashboardData data;
+  final bool expanded;
+  final VoidCallback onToggle;
+  const _RecentCell({
+    required this.recent,
+    required this.data,
+    required this.expanded,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final recent = this.recent;
+    if (recent == null) {
+      return const Tooltip(
+        message: "The server could not read this user's activity",
+        child: _Muted('unknown', key: Key('recent-unknown')),
+      );
+    }
+    if (recent.isEmpty) return const _Muted('none', key: Key('recent-none'));
+    final more = recent.length - 1;
+    final toggle = more == 0
+        ? null
+        : InkWell(
+            key: const Key('activity-toggle'),
+            onTap: onToggle,
+            child: Tooltip(
+              message: expanded
+                  ? 'Show only the latest'
+                  : 'Show the last ${recent.length}',
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(expanded ? Icons.expand_less : Icons.expand_more,
+                    size: 16),
+                if (!expanded)
+                  Text('+$more', style: const TextStyle(fontSize: 11.5)),
+              ]),
+            ),
+          );
+    if (!expanded) {
+      return Row(mainAxisSize: MainAxisSize.min, spacing: 4, children: [
+        _ActivityEntry(recent.first, data),
+        ?toggle,
+      ]);
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        spacing: 4,
+        children: [
+          Column(
+            key: const Key('activity-expanded'),
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            spacing: 2,
+            children: [for (final e in recent) _ActivityEntry(e, data)],
+          ),
+          ?toggle,
+        ],
+      ),
+    );
+  }
+}
+
+/// The line under the count while the activity columns are not filled:
+/// loading, failed (with a retry), or not provided by this server.
+class _ActivityStatus extends StatelessWidget {
+  final _ActivityState state;
+  final Object? error;
+  final VoidCallback retry;
+  const _ActivityStatus(this.state, this.error, this.retry);
+
+  @override
+  Widget build(BuildContext context) {
+    final (Widget icon, String text) = switch (state) {
+      _ActivityState.loading => (
+          const SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(strokeWidth: 2)),
+          'Loading activity — the table can be used meanwhile',
+        ),
+      _ActivityState.failed => (
+          const Icon(Icons.error_outline, size: 16),
+          'Activity could not be loaded: $error',
+        ),
+      _ActivityState.unavailable => (
+          const Icon(Icons.info_outline, size: 16),
+          'This server does not report user activity; those columns are '
+              'blank',
+        ),
+      _ActivityState.loaded => (const SizedBox.shrink(), ''),
+    };
+    if (text.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(children: [
+        icon,
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(text,
+              key: const Key('activity-status'),
+              style: Theme.of(context).textTheme.bodySmall),
+        ),
+        if (state == _ActivityState.failed)
+          TextButton(onPressed: retry, child: const Text('Retry')),
+      ]),
+    );
+  }
+}
+
 /// Material draws no scrollbar on a horizontal scroll view, so a table wider
 /// than the card would hide its last columns without a sign. This one shows
 /// the horizontal thumb whenever there is something to scroll to: under the
@@ -209,10 +463,60 @@ class _UsersScreenState extends State<UsersScreen> {
   /// baseline every account carries and is not offered here.
   static const _roles = ['manager', 'operator', 'admin'];
 
+  /// The activity columns: loaded once per window, beside the list.
+  _ActivityState _activityState = _ActivityState.loading;
+  UserActivityReport? _activity;
+  Object? _activityError;
+  int _activityRequest = 0;
+
+  /// Users whose Last worked on cell is open, by domain and id.
+  final _expanded = <(String, String)>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadActivity();
+  }
+
+  @override
+  void didUpdateWidget(UsersScreen old) {
+    super.didUpdateWidget(old);
+    if (old.activityWindow != widget.activityWindow) _loadActivity();
+  }
+
   @override
   void dispose() {
     _filterField.dispose();
     super.dispose();
+  }
+
+  /// Asks for the activity and fills the columns when it comes. An answer
+  /// to an older request (the window changed meanwhile) is dropped.
+  Future<void> _loadActivity() async {
+    final request = ++_activityRequest;
+    if (mounted) {
+      setState(() {
+        _activityState = _ActivityState.loading;
+        _activityError = null;
+      });
+    }
+    try {
+      final report =
+          await widget.data.userActivity(window: widget.activityWindow);
+      if (!mounted || request != _activityRequest) return;
+      setState(() {
+        _activity = report;
+        _activityState = report == null
+            ? _ActivityState.unavailable
+            : _ActivityState.loaded;
+      });
+    } catch (e) {
+      if (!mounted || request != _activityRequest) return;
+      setState(() {
+        _activityError = e;
+        _activityState = _ActivityState.failed;
+      });
+    }
   }
 
   Future<void> _changeRole(BuildContext context, DashboardUser user, String role,
@@ -283,9 +587,40 @@ class _UsersScreenState extends State<UsersScreen> {
       )),
       DataCell(Text(user.domain.isEmpty ? 'default' : user.domain)),
       DataCell(Text(formatDate(user.createdDate))),
+      ..._activityCells(user),
       DataCell(_ProjectsOwned(user)),
       DataCell(_Tags(user.tags ?? const [])),
     ]);
+  }
+
+  bool get _windowed => !widget.activityWindow.isAllTime;
+
+  /// Last worked on, Active days and — with a window — Days in window.
+  List<DataCell> _activityCells(DashboardUser user) {
+    final count = _windowed ? 3 : 2;
+    final pending = _pendingCell(_activityState, _activityError);
+    if (pending != null) return List.filled(count, DataCell(pending));
+    final key = (user.domain, user.id);
+    final activity = _activity?[key];
+    // A user the answer does not name (created since it was read): blank.
+    if (activity == null) {
+      return List.filled(count, const DataCell(SizedBox.shrink()));
+    }
+    return [
+      DataCell(_RecentCell(
+        recent: activity.recent,
+        data: widget.data,
+        expanded: _expanded.contains(key),
+        onToggle: () => setState(() {
+          if (!_expanded.remove(key)) _expanded.add(key);
+        }),
+      )),
+      DataCell(
+          _ActiveDays(activity.activeDays, lowerBound: activity.truncated)),
+      if (_windowed)
+        DataCell(_ActiveDays(activity.activeDaysInWindow,
+            lowerBound: activity.windowTruncated)),
+    ];
   }
 
   @override
@@ -325,9 +660,15 @@ class _UsersScreenState extends State<UsersScreen> {
         // The count line, and for admins the Create user button beside it.
         final banner = Row(children: [
           Expanded(
-            child: Text(showingBanner(listing, visible.length),
-                key: const Key('users-banner'),
-                style: theme.textTheme.bodySmall),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(showingBanner(listing, visible.length),
+                    key: const Key('users-banner'),
+                    style: theme.textTheme.bodySmall),
+                _ActivityStatus(_activityState, _activityError, _loadActivity),
+              ],
+            ),
           ),
           if (widget.data.session.isAdmin)
             FilledButton.icon(
@@ -389,6 +730,12 @@ class _UsersScreenState extends State<UsersScreen> {
                   dataTableTheme: theme.dataTableTheme.copyWith(
                     headingTextStyle: theme.textTheme.labelSmall
                         ?.copyWith(letterSpacing: 0.6),
+                    // A row grows to hold an open Last worked on cell; the
+                    // others keep their height. Set on the theme, not the
+                    // table: the table multiplies its own value into the
+                    // space below a short last page, and infinity there is
+                    // NaN. A finite value would stretch every row to it.
+                    dataRowMaxHeight: double.infinity,
                   ),
                 ),
                 child: ScrollConfiguration(
@@ -413,23 +760,38 @@ class _UsersScreenState extends State<UsersScreen> {
                           },
                     showEmptyRows: false,
                     showFirstLastButtons: true,
-                    // Eight columns: at the default spacing the last ones fall
-                    // off a laptop-width screen.
+                    // Ten columns or more: at the default spacing the last
+                    // ones fall off a laptop-width screen.
                     columnSpacing: 20,
-                    columns: const [
-                      DataColumn(label: Text('NAME')),
-                      DataColumn(label: Text('EMAIL')),
-                      DataColumn(label: Text('ROLES')),
-                      DataColumn(label: Text('VALIDATED')),
-                      DataColumn(label: Text('DOMAIN')),
-                      DataColumn(label: Text('CREATED')),
+                    columns: [
+                      const DataColumn(label: Text('NAME')),
+                      const DataColumn(label: Text('EMAIL')),
+                      const DataColumn(label: Text('ROLES')),
+                      const DataColumn(label: Text('VALIDATED')),
+                      const DataColumn(label: Text('DOMAIN')),
+                      const DataColumn(label: Text('CREATED')),
+                      const DataColumn(
+                          label: Text('LAST\nWORKED ON'),
+                          tooltip: 'The last workflows and other objects '
+                              'worked on, newest first'),
+                      const DataColumn(
+                          label: Text('ACTIVE\nDAYS', textAlign: TextAlign.end),
+                          tooltip: 'Days with activity, all time',
+                          numeric: true),
+                      if (_windowed)
+                        DataColumn(
+                            label: const Text('DAYS IN\nWINDOW',
+                                textAlign: TextAlign.end),
+                            tooltip:
+                                'Days with activity, ${widget.activityWindow}',
+                            numeric: true),
                       // On two lines: on one, the heading is three times
                       // as wide as a four-digit count.
-                      DataColumn(
+                      const DataColumn(
                           label: Text('PROJECTS\nOWNED',
                               textAlign: TextAlign.end),
                           numeric: true),
-                      DataColumn(label: Text('TAGS')),
+                      const DataColumn(label: Text('TAGS')),
                     ],
                     source: _UserRows(
                         visible, (user) => _userRow(context, user, refresh)),
