@@ -1,7 +1,7 @@
 name: tercen_dashboard
 description: "Tercen admin & manager dashboard — platform operations and per-tenant usage analytics, deployed as a Tercen web app."
 publish_to: 'none'
-version: 0.1.0
+version: 0.6.0
 
 environment:
   sdk: ^3.9.0
