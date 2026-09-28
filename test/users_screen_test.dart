@@ -113,6 +113,42 @@ Future<void> _nextPage(WidgetTester tester) async {
   await tester.tap(find.byTooltip('Next page'));
 }
 
+/// The texts on [name]'s row, left to right: every Text in the table level
+/// with the name. Icons (Validated, the role menu) are not Texts.
+List<String> _rowTexts(WidgetTester tester, String name) {
+  final y = tester.getCenter(find.text(name)).dy;
+  final texts = find.descendant(
+      of: find.byType(DataTable), matching: find.byType(Text));
+  final onRow = [
+    for (var i = 0; i < texts.evaluate().length; i++)
+      if ((tester.getCenter(texts.at(i)).dy - y).abs() < 4) texts.at(i),
+  ]..sort((a, b) =>
+      tester.getCenter(a).dx.compareTo(tester.getCenter(b).dx));
+  return [for (final t in onRow) tester.widget<Text>(t).data!];
+}
+
+/// Rows as a server with tercen/sci#1664 sends them: `tags` and
+/// `projectsOwned` on every row, a null count where the server could not
+/// count, 0 where it counted none.
+List<Map<String, Object?>> _w3Rows() => [
+      for (final (name, domain, tags, owned) in [
+        ('user-a', '', ['pilot', 'beta'], 4),
+        ('user-b', 'north', <String>[], 0),
+        ('user-c', 'north', ['beta'], null),
+      ])
+        {
+          'id': 'id-$name',
+          'name': name,
+          'email': '$name@example.test',
+          'domain': domain,
+          'roles': ['user'],
+          'isValidated': true,
+          'createdDate': '2026-09-01T12:00:00',
+          'tags': tags,
+          'projectsOwned': owned,
+        }
+    ];
+
 String _banner(WidgetTester tester) =>
     tester.widget<Text>(find.byKey(const Key('users-banner'))).data!;
 
@@ -131,7 +167,9 @@ void main() {
         'ROLES',
         'VALIDATED',
         'DOMAIN',
-        'CREATED'
+        'CREATED',
+        'PROJECTS\nOWNED',
+        'TAGS',
       ]) {
         expect(find.text(column), findsOneWidget);
       }
@@ -147,6 +185,22 @@ void main() {
       // A null createdDate renders as a dash, not "null".
       expect(find.text('—'), findsOneWidget);
       expect(find.text('null'), findsNothing);
+
+      // No tags or projectsOwned (a server before tercen/sci#1664): those
+      // cells are blank, not 0 and not "unknown".
+      expect(_rowTexts(tester, 'user-002'), [
+        'user-002',
+        'user2@example.test',
+        'north',
+        '2026-09-01 12:00',
+      ]);
+      expect(_rowTexts(tester, 'user-003'), [
+        'user-003',
+        'user3@example.test',
+        'default',
+        '2026-09-01 12:00',
+      ]);
+      expect(find.byKey(const Key('projects-owned-unknown')), findsNothing);
 
       await _nextPage(tester);
       await tester.pumpAndSettle();
@@ -271,6 +325,19 @@ void main() {
       expect(find.text('user-012'), findsOneWidget);
       expect(find.text('—'), findsOneWidget);
 
+      // Every column is there; the ones this server cannot fill are blank.
+      for (final column in ['ROLES', 'PROJECTS\nOWNED', 'TAGS']) {
+        expect(find.text(column), findsOneWidget);
+      }
+      expect(find.byTooltip('Change roles'), findsNWidgets(12));
+      expect(_rowTexts(tester, 'user-012'), [
+        'user-012',
+        'user12@example.test',
+        'north',
+        '2026-09-01 12:00',
+      ]);
+      expect(find.byKey(const Key('projects-owned-unknown')), findsNothing);
+
       // A list that fits one page puts the pager right under its last row,
       // not a full empty page below it.
       final lastRow = tester.getBottomLeft(find.text('user-012')).dy;
@@ -288,6 +355,147 @@ void main() {
           'limit of 1000; this server does not report a total');
       await _unmount(tester);
     });
+  });
+
+  group('tags and projectsOwned (tercen/sci#1664)', () {
+    testWidgets('renders the count, 0, unknown and the tags', (tester) async {
+      await _pump(tester,
+          {'rows': _w3Rows(), 'total': 3, 'truncated': false});
+
+      expect(_banner(tester), 'Showing 3 of 3 users');
+      expect(_rowTexts(tester, 'user-a'), [
+        'user-a',
+        'user-a@example.test',
+        'default',
+        '2026-09-01 12:00',
+        '4',
+        'pilot',
+        'beta',
+      ]);
+      // Counted, none owned: 0. Empty tags: nothing.
+      expect(_rowTexts(tester, 'user-b'), [
+        'user-b',
+        'user-b@example.test',
+        'north',
+        '2026-09-01 12:00',
+        '0',
+      ]);
+      // Not counted: "unknown", not 0 and not blank.
+      expect(_rowTexts(tester, 'user-c'), [
+        'user-c',
+        'user-c@example.test',
+        'north',
+        '2026-09-01 12:00',
+        'unknown',
+        'beta',
+      ]);
+      expect(find.text('null'), findsNothing);
+
+      // And it looks different from a count.
+      final unknown = tester.widget<Text>(
+          find.byKey(const Key('projects-owned-unknown')));
+      final zero = tester.widget<Text>(find.text('0'));
+      expect(unknown.style?.fontStyle, FontStyle.italic);
+      expect(zero.style?.fontStyle, isNot(FontStyle.italic));
+      expect(find.byTooltip(
+              'The server could not count the projects in this instance'),
+          findsOneWidget);
+
+      // The role controls are still on every row.
+      expect(find.byTooltip('Change roles'), findsNWidgets(3));
+      await _unmount(tester);
+    });
+
+    test('fromJson keeps absent, null and 0 apart', () {
+      final absent = DashboardUser.fromJson({'name': 'x'});
+      expect(absent.projectsOwnedReported, isFalse);
+      expect(absent.projectsOwned, isNull);
+      expect(absent.tags, isNull);
+      expect(absent.domain, '');
+
+      final unknown =
+          DashboardUser.fromJson({'name': 'x', 'projectsOwned': null});
+      expect(unknown.projectsOwnedReported, isTrue);
+      expect(unknown.projectsOwned, isNull);
+
+      final zero = DashboardUser.fromJson({
+        'name': 'x',
+        'domain': 'north',
+        'projectsOwned': 0,
+        'tags': <String>[],
+      });
+      expect(zero.projectsOwnedReported, isTrue);
+      expect(zero.projectsOwned, 0);
+      expect(zero.tags, isEmpty);
+      expect(zero.domain, 'north');
+    });
+
+    test('fromJson drops null and non-string tags', () {
+      final user = DashboardUser.fromJson({
+        'name': 'x',
+        'tags': ['pilot', null, 7, '', true, 'beta'],
+      });
+      expect(user.tags, ['pilot', 'beta']);
+    });
+
+    testWidgets('a null tag is not a "null" chip', (tester) async {
+      final rows = _w3Rows();
+      rows[0]['tags'] = [null, 'pilot', 42];
+      await _pump(tester, {'rows': rows, 'total': 3, 'truncated': false});
+
+      expect(_rowTexts(tester, 'user-a').skip(4), ['4', 'pilot']);
+      expect(find.text('null'), findsNothing);
+      expect(find.text('42'), findsNothing);
+      await _unmount(tester);
+    });
+
+    // Unbounded, 30 tags or one 300-character tag made the table several
+    // thousand pixels wide. Bounded, it is at most one Tags cell (two
+    // chips and a "+N") wider than the same table with no tags at all.
+    for (final (label, tags) in [
+      ('30 tags', [for (var i = 1; i <= 30; i++) 'tag-$i']),
+      ('one 300-character tag', ['x' * 300]),
+    ]) {
+      testWidgets('$label keep the table width bounded', (tester) async {
+        const maxCell = 3 * 80.0 + 2 * 4;
+        final untagged = [
+          for (final row in _w3Rows()) {...row, 'tags': <String>[]},
+        ];
+        await _pump(
+            tester, {'rows': untagged, 'total': 3, 'truncated': false});
+        final base = tester.getSize(find.byType(DataTable)).width;
+        await _unmount(tester);
+
+        final rows = _w3Rows();
+        rows[0]['tags'] = tags;
+        rows[2]['tags'] = <String>[];
+        await _pump(tester, {'rows': rows, 'total': 3, 'truncated': false});
+
+        expect(tester.takeException(), isNull);
+        expect(tester.getSize(find.byType(DataTable)).width,
+            lessThanOrEqualTo(base + maxCell));
+        // The cell: at most two chips and a "+N", each chip bounded.
+        final cell = find.ancestor(
+            of: find.text(tags.first), matching: find.byType(Tooltip));
+        expect(tester.getSize(cell).width, lessThanOrEqualTo(maxCell));
+        for (final tag in tags.take(2)) {
+          expect(tester.getSize(find.text(tag)).width, lessThan(80));
+        }
+        if (tags.length > 2) {
+          expect(find.text('tag-3'), findsNothing);
+          expect(
+              tester.widget<Text>(find.descendant(
+                  of: find.byKey(const Key('tags-more')),
+                  matching: find.byType(Text))).data,
+              '+28');
+        } else {
+          expect(find.byKey(const Key('tags-more')), findsNothing);
+        }
+        // The full list is still there, as the cell's tooltip.
+        expect(find.byTooltip(tags.join(', ')), findsOneWidget);
+        await _unmount(tester);
+      });
+    }
   });
 
   group('UserListing.mayHaveMore', () {

@@ -196,12 +196,16 @@ class FakeDashboardData extends DashboardData {
         total: 5,
         truncated: false,
         users: [
-          for (final (name, domain, roles, validated, created) in [
-            ('admin', '', ['admin'], true, '2025-01-10T09:00:00'),
-            ('ada', '', ['user', 'manager'], true, '2026-02-03T10:30:00'),
-            ('grace', '', ['user'], true, '2026-04-18T16:12:00'),
-            ('linus', 'north', ['user'], true, '2026-06-01T08:45:00'),
-            ('margaret', 'north', ['user'], false, '2026-09-20T17:20:00'),
+          // linus's instance could not count projects: "unknown", not 0.
+          for (final (name, domain, roles, validated, created, tags, owned) in [
+            ('admin', '', ['admin'], true, '2025-01-10T09:00:00', ['staff'], 3),
+            ('ada', '', ['user', 'manager'], true, '2026-02-03T10:30:00',
+                ['pilot', 'cytometry'], 12),
+            ('grace', '', ['user'], true, '2026-04-18T16:12:00', <String>[], 0),
+            ('linus', 'north', ['user'], true, '2026-06-01T08:45:00',
+                ['beta'], null),
+            ('margaret', 'north', ['user'], false, '2026-09-20T17:20:00',
+                <String>[], 1),
           ])
             DashboardUser(
               id: 'user-$name',
@@ -211,6 +215,9 @@ class FakeDashboardData extends DashboardData {
               roles: roles,
               isValidated: validated,
               createdDate: created,
+              tags: tags,
+              projectsOwned: owned,
+              projectsOwnedReported: true,
             ),
         ],
       );
@@ -367,4 +374,69 @@ class ManyUsersData extends FakeDashboardData {
             ),
         ],
       );
+}
+
+/// [FakeDashboardData] with one more user, `tagged`, whose tags are [tags]:
+/// many tags, or one very long one, to show the Tags cell stays bounded.
+/// [name], [roles], [domain], [validated] and [owned] make the rest of that
+/// row as wide as the test needs.
+class TaggedUsersData extends FakeDashboardData {
+  final List<String> tags;
+  final String name;
+  final List<String> roles;
+  final String domain;
+  final bool validated;
+  final int owned;
+  TaggedUsersData(
+    this.tags, {
+    this.name = 'tagged',
+    this.roles = const ['user'],
+    this.domain = '',
+    this.validated = true,
+    this.owned = 2,
+  });
+
+  /// The widest row the fixtures allow: a name and email longer than any
+  /// other fixture's, every grantable role, not validated, a domain, a
+  /// four-digit project count, and a thousand tags whose first ones fill a
+  /// chip, so the "+N" chip is four characters wide too. A longer [name]
+  /// makes a row wider than that.
+  TaggedUsersData.worstCase({String name = 'worst-case'})
+      : this(
+          [
+            for (var i = 1; i <= 3; i++) 'W' * 40,
+            for (var i = 4; i <= 1000; i++) 'tag-$i',
+          ],
+          name: name,
+          roles: const ['user', 'manager', 'operator', 'admin'],
+          domain: 'north',
+          validated: false,
+          owned: 1234,
+        );
+
+  @override
+  Future<UserListing> users({int limit = UserRows.serverMaxLimit}) async {
+    final listing = await super.users(limit: limit);
+    return UserListing(
+      viaFallback: false,
+      limit: limit,
+      total: listing.users.length + 1,
+      truncated: false,
+      users: [
+        ...listing.users,
+        DashboardUser(
+          id: 'user-$name',
+          name: name,
+          email: '$name@example.test',
+          domain: domain,
+          roles: roles,
+          isValidated: validated,
+          createdDate: '2026-09-21T09:00:00',
+          tags: tags,
+          projectsOwned: owned,
+          projectsOwnedReported: true,
+        ),
+      ],
+    );
+  }
 }

@@ -210,6 +210,9 @@ class WorkflowRef {
 }
 
 /// A user row from AdminService.listUsers.
+///
+/// [tags] and [projectsOwned] are what the server reports and nothing more: a key the server does not send stays null, and the table
+/// leaves its cell blank.
 class DashboardUser {
   final String id;
   final String name;
@@ -219,6 +222,18 @@ class DashboardUser {
   final bool isValidated;
   final String createdDate;
 
+  /// `User.tags`, from a server with tercen/sci#1664; null before it. Only
+  /// the non-empty strings: a null or non-string entry is dropped, so it
+  /// never renders as a "null" chip.
+  final List<String>? tags;
+
+  /// Live projects the user owns (tercen/sci#1664). Null both when the key
+  /// is absent and when the server sent null — [projectsOwnedReported] tells
+  /// them apart: absent is an older server, null is a count the server could
+  /// not make.
+  final int? projectsOwned;
+  final bool projectsOwnedReported;
+
   const DashboardUser({
     required this.id,
     required this.name,
@@ -227,17 +242,32 @@ class DashboardUser {
     required this.roles,
     required this.isValidated,
     required this.createdDate,
+    this.tags,
+    this.projectsOwned,
+    this.projectsOwnedReported = false,
   });
 
-  factory DashboardUser.fromJson(Map<String, dynamic> m) => DashboardUser(
-        id: '${m['id'] ?? ''}',
-        name: '${m['name'] ?? ''}',
-        email: '${m['email'] ?? ''}',
-        domain: '${m['domain'] ?? ''}',
-        roles: ((m['roles'] as List?) ?? []).map((r) => '$r').toList(),
-        isValidated: m['isValidated'] == true,
-        createdDate: '${m['createdDate'] ?? ''}',
-      );
+  factory DashboardUser.fromJson(Map<String, dynamic> m) {
+    final tags = m['tags'];
+    final owned = m['projectsOwned'];
+    return DashboardUser(
+      id: '${m['id'] ?? ''}',
+      name: '${m['name'] ?? ''}',
+      email: '${m['email'] ?? ''}',
+      domain: '${m['domain'] ?? ''}',
+      roles: ((m['roles'] as List?) ?? []).map((r) => '$r').toList(),
+      isValidated: m['isValidated'] == true,
+      createdDate: '${m['createdDate'] ?? ''}',
+      tags: tags is List
+          ? [
+              for (final t in tags)
+                if (t is String && t.isNotEmpty) t,
+            ]
+          : null,
+      projectsOwned: owned is num ? owned.toInt() : null,
+      projectsOwnedReported: m.containsKey('projectsOwned'),
+    );
+  }
 }
 
 /// Typed view over the AdminService scheduler-status pairs.
